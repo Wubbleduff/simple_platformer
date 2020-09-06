@@ -15,13 +15,15 @@ struct Player
     v2 full_extents;
 
     float acceleration_strength;
-    v2 velocity;
+    float horizontal_speed;
+    float vertical_speed;
     float friction_strength;
     float drag_strength;
     float jump_strength;
 
     bool grounded;
     v2 shoe_position;
+    float shoe_radius;
     v2 standing_plane_normal;
 };
 
@@ -110,7 +112,7 @@ struct Level
     int num_enemies;
     Enemy *enemies;
 
-    v2 gravity_force; // A level has a gravity force, make this a vector force to easily add cool level changing effects!
+    float gravity_force; // A level has a gravity force, make this a vector force to easily add cool level changing effects!
 };
 static const float EPSILON = 0.0001f;
 
@@ -121,11 +123,15 @@ static void reset_player(Player *player)
     player->position = v2(2.0f, 2.0f);
     player->full_extents = v2(1.0f, 2.0f) * 0.2f;
     player->acceleration_strength = 32.0f;
-    player->velocity = v2();
+    player->horizontal_speed = 0.0f;
+    player->vertical_speed = 0.0f;
     player->friction_strength = 12.0f;
     player->drag_strength = 0.5f;
     player->jump_strength = 5.0f;
     player->grounded = false;
+
+    player->shoe_radius = 0.20f;
+    player->shoe_position = v2(0.0f, 0.025f);
 }
 
 static LevelGeometryChunk *create_piece_of_level_geometry()
@@ -209,26 +215,17 @@ static LevelGeometryChunk *create_piece_of_level_geometry()
     return chunk;
 }
 
-static void render_level(Level *level)
+
+static void draw_cylinder(RendererState *renderer_state, v2 pos, v2 full_extents, v4 color)
 {
-    RendererState *renderer_state = get_engine_renderer_state();
-    Player *player = level->player;
-
-    v2 camera_offset = v2(2.0f, 1.0f);
-    set_camera_position(renderer_state, v2(player->position.x, 0.0f) + camera_offset);
-    set_camera_width(renderer_state, 10.0f);
-
-    draw_quad(renderer_state, player->position + v2(0.0f, player->full_extents.y / 2.0f), player->full_extents, 0.0f, v4(0.5f, 0.0f, 1.0f, 1.0f));
-
-    LevelGeometryChunk *chunk = level->static_level_geometry->chunks[0];
-    draw_triangles(
-            renderer_state, chunk->num_vertices, chunk->vertices,
-            chunk->num_triangles, (v2 **)(chunk->triangulation),
-            v4(0.15f, 0.3f, 0.0f, 1.0f)
-            );
-
-    draw_quad(renderer_state, player->shoe_position, v2(1.0f, 1.0f) * 0.01f, 0.0f, v4(1.0f, 1.0f, 0.0f, 1.0f));
-    draw_line(renderer_state, player->position, player->position + player->standing_plane_normal * 0.1f, v4(1.0f, 1.0f, 0.0f, 1.0f));
+    float radius = full_extents.x / 2.0f;
+    v2 diff = v2(0.0f, full_extents.y / 2.0f - radius);
+    v2 a = pos + diff;
+    v2 b = pos - diff;
+    draw_circle(renderer_state, a, radius, color);
+    draw_circle(renderer_state, b, radius, color);
+    draw_line(renderer_state, b + v2(radius, 0.0f), a + v2(radius, 0.0f), color);
+    draw_line(renderer_state, a - v2(radius, 0.0f), b - v2(radius, 0.0f), color);
 }
 
 static bool line_line_collision(v2 p1, v2 p2, v2 q1, v2 q2, v2 *hit_point)
@@ -443,7 +440,6 @@ static bool cylinder_line_collision(v2 position, v2 full_extents, v2 start, v2 e
     circle_centers[2] = circle_centers[1] + v2(0.0f, full_extents.y - circle_radius * 2.0f);
     circle_centers[3] = circle_centers[2] - diff;
 
-
     lines[0] = circle_centers[0] - normal * circle_radius;
     lines[1] = circle_centers[1] - normal * circle_radius;
     lines[2] = circle_centers[1] + v2(circle_radius, 0.0f);
@@ -453,6 +449,76 @@ static bool cylinder_line_collision(v2 position, v2 full_extents, v2 start, v2 e
     lines[6] = circle_centers[3] - v2(circle_radius, 0.0f);
     lines[7] = circle_centers[0] - v2(circle_radius, 0.0f);
 
+    float min_depth = INFINITY;
+    v2 direction = v2();
+    bool collision_exists = false;
+
+    // Check lines first
+    for(int i = 0; i < 8; i += 2)
+    {
+        v2 *a = &(lines[i]);
+        v2 *b = &(lines[i + 1]);
+        v2 n = find_ccw_normal(normalize(*b - *a));
+        float dist = signed_distance_to_plane(position, *a, n);
+        if(dist < 0.0f)
+        {
+            // No possible collision exists
+            collision_exists = false;
+            break;
+        }
+        if(dist < min_depth)
+        {
+            min_depth = dist;
+            direction = -n;
+            collision_exists = true;
+        }
+    }
+
+    // Check the circles
+    for(int i = 0; i < 4; i++)
+    {
+        v2 *center = &(circle_centers[i]);
+        v2 *a;
+        v2 *b = &(lines[i * 2]);
+        if(i == 0) a = &(lines[7]);
+        else       a = &(lines[i * 2 - 1]);
+        v2 cp = position - *center;
+        v2 ca = *a - *center;
+        v2 cb = *b - *center;
+
+#if 0
+        {
+            RendererState *renderer_state = get_engine_renderer_state();
+            v4 color = v4(1, 1, 0.5f, 0.25f);
+            draw_line(renderer_state, *center + new_origin, *a + new_origin, color);
+            draw_line(renderer_state, *center + new_origin, *b + new_origin, color);
+        }
+#endif
+
+        v2 a_n =  find_ccw_normal(normalize(ca));
+        v2 b_n = -find_ccw_normal(normalize(cb));
+        float a_align = dot(cp, a_n);
+        float b_align = dot(cp, b_n);
+        if(a_align > 0.0f && b_align > 0.0f)
+        {
+            if(length(cp) < circle_radius)
+            {
+                // Resolve to the circle's edge since that has to be the closest edge
+                min_depth = circle_radius - length(cp);
+                direction = normalize(cp);
+                collision_exists = true;
+                break;
+            }
+            else
+            {
+                // No possible collision exists
+                collision_exists = false;
+                break;
+            }
+        }
+    }
+
+#if 0
     {
         RendererState *renderer_state = get_engine_renderer_state();
         v4 color = v4(1, 1, 0.5f, 0.25f);
@@ -463,14 +529,36 @@ static bool cylinder_line_collision(v2 position, v2 full_extents, v2 start, v2 e
         }
         for(int i = 0; i < 8; i += 2)
         {
-            draw_line(renderer_state, lines[i] + new_origin, lines[i + 1] + new_origin, color);
+            v2 a = lines[i] + new_origin;
+            v2 b = lines[i + 1] + new_origin;
+            v2 n = find_ccw_normal(normalize(b - a));
+            v2 mid = (a + b) / 2.0f;
+            draw_line(renderer_state, a, b, color);
+            draw_line(renderer_state, mid, mid + n * 0.1f, color);
         }
     }
+#endif
 
-    return false;
+    collision->depth = min_depth;
+    collision->resolution_direction = direction;
+    return collision_exists;
 }
 
-static Line *find_standing_plane(Level *level, v2 point)
+static float distance_to_line_segment(v2 p, v2 a, v2 b)
+{
+    v2 ab = b - a;
+    v2 ba = a - b;
+    v2 ap = p - a;
+    v2 bp = p - b;
+
+    if(dot(ab, ap) < 0.0f) return length(ap);
+    if(dot(ba, bp) < 0.0f) return length(bp);
+
+    v2 n = find_ccw_normal(normalize(ab));
+    return absf(signed_distance_to_plane(p, a, n));
+}
+
+static Line *find_standing_plane(Level *level, v2 shoe_position, float shoe_radius)
 {
     float min_dist = INFINITY;
     Line *closest_plane = nullptr;
@@ -485,12 +573,21 @@ static Line *find_standing_plane(Level *level, v2 point)
         for(int j = 0; j < num_planes; j++)
         {
             Line *plane = &(planes[j]);
-            v2 n = find_ccw_normal(*plane->b - *plane->a);
-            float dist = signed_distance_to_plane(point, *plane->a, n);
+            //v2 n = find_ccw_normal(*plane->b - *plane->a);
+            //float dist = signed_distance_to_plane(point, *plane->a, n);
 
-            if(dist < 0.0f) continue; // Ignore planes not inside
+            {
+                InputState *is = get_engine_input_state();
+                if(key_toggled_down(is, ' '))
+                {
+                    int xx = 0;
+                    xx++;
+                }
+            }
 
-            if(dist < min_dist)
+            float dist = distance_to_line_segment(shoe_position, *(plane->a), *(plane->b));
+
+            if((dist < shoe_radius) && (dist < min_dist))
             {
                 min_dist = dist;
                 closest_plane = plane;
@@ -498,8 +595,59 @@ static Line *find_standing_plane(Level *level, v2 point)
         }
     }
 
+#if 0
+    {
+        RendererState *renderer_state = get_engine_renderer_state();
+        v4 color = v4(1.0f, 1.0f, 0.0f, 0.75f);
+        draw_circle(renderer_state, shoe_position, shoe_radius, color);
+        if(closest_plane)
+        {
+            v2 a = *(closest_plane->a);
+            v2 b = *(closest_plane->b);
+            v2 n = find_ccw_normal(normalize(b - a));
+            v2 mid = (a + b) / 2.0f;
+            draw_line(renderer_state, mid, mid + n * 0.1f, color);
+        }
+    }
+#endif
+
     return closest_plane;
 }
+
+static void render_level(Level *level)
+{
+    RendererState *renderer_state = get_engine_renderer_state();
+    Player *player = level->player;
+
+    v2 camera_offset = v2(2.0f, 1.0f);
+    set_camera_position(renderer_state, v2(player->position.x, 0.0f) + camera_offset);
+    set_camera_width(renderer_state, 10.0f);
+
+    draw_quad(renderer_state, player->position + v2(0.0f, player->full_extents.y / 2.0f), player->full_extents, 0.0f, v4(0.5f, 0.0f, 1.0f, 1.0f));
+
+    LevelGeometryChunk *chunk = level->static_level_geometry->chunks[0];
+    /*
+    draw_triangles(
+            renderer_state, chunk->num_vertices, chunk->vertices,
+            chunk->num_triangles, (v2 **)(chunk->triangulation),
+            v4(0.15f, 0.3f, 0.0f, 1.0f)
+            );
+    */
+    for(int i = 0; i < chunk->num_physical_planes; i++)
+    {
+        Line *line = &(chunk->physical_planes[i]);
+        draw_line(renderer_state, *line->a, *line->b, v4(1, 1, 1, 1));
+    }
+    /*
+    draw_circle(renderer_state, player->position + player->shoe_position, player->shoe_radius, v4(1.0f, 1.0f, 0.0f, 1.0f));
+    if(player->grounded)
+    {
+        v2 pos = player->position + player->shoe_position;
+        draw_line(renderer_state, pos, pos + player->standing_plane_normal * player->shoe_radius, v4(1.0f, 1.0f, 0.0f, 1.0f));
+    }
+    */
+}
+
 
 
 
@@ -526,7 +674,7 @@ Level *create_level(/*...*/)
     reset_player(level->player);
     // ...
 
-    level->gravity_force = v2(0.0f, -9.81f);
+    level->gravity_force = -9.81f;
 
     return level;
 }
@@ -541,7 +689,7 @@ void level_step(Level *level, float dt)
         level->paused = !level->paused;
     }
 
-    if(key_toggled_down(input_state, 'R')) // ESCAPE
+    if(key_toggled_down(input_state, 'R'))
     {
         reset_player(level->player);
     }
@@ -553,66 +701,58 @@ void level_step(Level *level, float dt)
     {
         Player *player = level->player;
 
-
         // Input to drive kinematics
-        v2 force = v2();
+        float horizontal_force = 0.0f;
+        float vertical_force = 0.0f;
 
+        if(key_state(input_state, 'A'))
+        {
+            horizontal_force -= player->acceleration_strength;
+        }
+        if(key_state(input_state, 'D'))
+        {
+            horizontal_force += player->acceleration_strength;
+        }
 
+        // Drag
+        horizontal_force -= player->horizontal_speed * player->drag_strength;
+        vertical_force -= player->vertical_speed * player->drag_strength;
+
+        // Friction
+        // Should apply even if airborne to make movement feel consistent?
+        horizontal_force -= player->horizontal_speed * player->friction_strength;
+
+        v2 horizontal_direction = v2(1.0f, 0.0f);
+        v2 vertical_direction = v2(0.0f, 1.0f);
         if(player->grounded)
         {
             v2 plane_normal = player->standing_plane_normal;
             v2 plane_direction = find_ccw_normal(plane_normal);
 
-            if(key_state(input_state, 'A'))
-            {
-                force -= plane_direction * player->acceleration_strength;
-            }
-            if(key_state(input_state, 'D'))
-            {
-                force += plane_direction * player->acceleration_strength;
-            }
+            horizontal_direction = plane_direction;
 
             if(key_toggled_down(input_state, ' '))
             {
-                player->velocity.y = player->jump_strength;
+                player->vertical_speed = player->jump_strength;
                 player->grounded = false;
             }
         }
         else
         {
-            if(key_state(input_state, 'A'))
-            {
-                force -= v2(1.0f, 0.0f) * player->acceleration_strength;
-            }
-            if(key_state(input_state, 'D'))
-            {
-                force += v2(1.0f, 0.0f) * player->acceleration_strength;
-            }
+            vertical_force += level->gravity_force;
         }
 
-        force += level->gravity_force;
+        player->horizontal_speed += horizontal_force * dt;
+        player->position += horizontal_direction * player->horizontal_speed * dt;
 
-        force -= player->velocity * player->drag_strength;
-        force.x -= player->velocity.x * player->friction_strength;
-
-        player->velocity += force * dt;
-        player->position += player->velocity * dt;
+        player->vertical_speed += vertical_force * dt;
+        player->position += vertical_direction * player->vertical_speed * dt;
 
 
-
-        player->shoe_position = player->position + v2(0.0f, -0.05f);
-        Line *closest_plane = find_standing_plane(level, player->shoe_position);
-        if(closest_plane != nullptr)
-        {
-            v2 standing_plane_normal = find_ccw_normal(normalize(*closest_plane->b - *closest_plane->a));
-            player->standing_plane_normal = standing_plane_normal;
-        }
 
 
 
         // NOTE: Right code top down! (usage code first)
-
-
 
 #if 1
         for(int iteration = 0; iteration < 4; iteration++)
@@ -621,8 +761,6 @@ void level_step(Level *level, float dt)
             Collision collision_data[16] = {};
             Collision *collision_end = &(collision_data[0]);
 
-            v2 player_bl = player->position + v2(-player->full_extents.x / 2.0f, 0.0f);
-            v2 player_tr = player->position + v2( player->full_extents.x / 2.0f, player->full_extents.y);
 
             int num_chunks = level->static_level_geometry->num_chunks;
             LevelGeometryChunk **chunks = level->static_level_geometry->chunks;
@@ -635,8 +773,11 @@ void level_step(Level *level, float dt)
                 {
                     Line *plane = &(planes[j]);
 
-                    bool hit = box_line_collision(player_bl, player_tr, *plane->a, *plane->b, collision_end);
-                    //bool hit = cylinder_line_collision(player->position, player->full_extents, *plane->a, *plane->b, collision_end);
+                    //v2 player_bl = player->position + v2(-player->full_extents.x / 2.0f, 0.0f);
+                    //v2 player_tr = player->position + v2( player->full_extents.x / 2.0f, player->full_extents.y);
+                    //bool hit = box_line_collision(player_bl, player_tr, *plane->a, *plane->b, collision_end);
+                    v2 pos = player->position + v2(0.0f, player->full_extents.y / 2.0f);
+                    bool hit = cylinder_line_collision(pos, player->full_extents, *plane->a, *plane->b, collision_end);
                     if(hit)
                     {
                         collision_end++;
@@ -645,7 +786,6 @@ void level_step(Level *level, float dt)
                 }
             }
 
-            player->grounded = false;
             int num_collisions = collision_end - &(collision_data[0]);
             for(int i = 0; i < num_collisions; i++)
             {
@@ -657,7 +797,7 @@ void level_step(Level *level, float dt)
                 if(absf(plane_angle) < max_slope_angle / 2.0f)
                 {
                     player->grounded = true;
-                    player->velocity.y = 0.0f;
+                    player->vertical_speed = 0.0f;
                 }
 
                 player->position += collision->resolution_direction * collision->depth * 0.75f;
@@ -666,7 +806,16 @@ void level_step(Level *level, float dt)
         }
 #endif
 
-
+        Line *closest_plane = find_standing_plane(level, player->position + player->shoe_position, player->shoe_radius);
+        if(player->grounded && closest_plane == nullptr)
+        {
+            player->grounded = false;
+        }
+        if(closest_plane != nullptr)
+        {
+            v2 standing_plane_normal = find_ccw_normal(normalize(*closest_plane->b - *closest_plane->a));
+            player->standing_plane_normal = standing_plane_normal;
+        }
 
 #if 0
         {
@@ -702,7 +851,7 @@ void level_step(Level *level, float dt)
         }
 #endif
 
-#if 1
+#if 0
         {
             static v2 a, b;
             static v2 pos = v2();
@@ -716,8 +865,15 @@ void level_step(Level *level, float dt)
 
             b = mouse_world_position(input_state);
 
+            draw_cylinder(renderer_state, pos, dim, v4(1, 1, 1, 1));
+            draw_quad(renderer_state, pos, v2(0.05f, 0.05f), 0.0f, v4(1, 1, 0, 1));
+
             Collision col;
             bool hit = cylinder_line_collision(pos, dim, a, b, &col);
+            if(hit)
+            {
+                draw_line(renderer_state, pos, pos + col.resolution_direction * col.depth, v4(0, 1, 0, 1));
+            }
         }
 #endif
 
@@ -802,6 +958,6 @@ void level_step(Level *level, float dt)
 
     }
 
-    //render_level(level);
+    render_level(level);
 }
 
