@@ -1,0 +1,15 @@
+
+x86
+x64
+Debug
+Release
+.vs
+intermediate
+run_trees
+builds
+textures
+
+imgui.ini
+*.rdbg
+
+
