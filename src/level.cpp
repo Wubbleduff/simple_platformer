@@ -746,13 +746,11 @@ void level_step(Level *level, float dt)
 
         if(player->grounded)
         {
-            /*
             if(key_toggled_down(input_state, ' '))
             {
                 player->vertical_speed = player->jump_strength;
                 player->grounded = false;
             }
-            */
         }
         else
         {
@@ -762,28 +760,15 @@ void level_step(Level *level, float dt)
         player->horizontal_speed += horizontal_force * dt;
         player->vertical_speed += vertical_force * dt;
 
-        if(player->horizontal_speed < EPSILON) player->horizontal_speed = 0.0f;
-        if(player->vertical_speed   < EPSILON) player->vertical_speed   = 0.0f;
-
-
-
+        if(absf(player->horizontal_speed) < EPSILON) player->horizontal_speed = 0.0f;
+        if(absf(player->vertical_speed)   < EPSILON) player->vertical_speed   = 0.0f;
 
 
 
         if(player->grounded)
         {
-            {
-                InputState *is = get_engine_input_state();
-                if(key_toggled_down(is, ' '))
-                {
-                    int d = 0;
-                    d++;
-                    player->horizontal_speed = 2.0f;
-                }
-            }
-
-            float current_speed = -player->horizontal_speed;
-            float movement_distance_remaining = absf(current_speed);
+            float current_velocity = -player->horizontal_speed * dt;
+            float movement_distance_remaining = absf(current_velocity);
             Line *standing_plane = player->standing_plane;
             float distance_along_standing_plane = player->distance_along_standing_plane;
             LevelGeometryChunk *chunk = level->static_level_geometry->chunks[0];
@@ -796,7 +781,7 @@ void level_step(Level *level, float dt)
                 float standing_plane_length = length(*standing_plane->b - *standing_plane->a);
 
                 float distance_until_end_of_plane;
-                if(current_speed > 0.0f)
+                if(current_velocity > 0.0f)
                 {
                     distance_until_end_of_plane = standing_plane_length - distance_along_standing_plane;
                 }
@@ -814,7 +799,7 @@ void level_step(Level *level, float dt)
                     movement_distance_remaining -= distance_until_end_of_plane;
                     
                     // Set standing plane to the next or previous plane
-                    if(current_speed > 0.0f)
+                    if(current_velocity > 0.0f)
                     {
                         standing_plane = next_plane;
                         distance_along_standing_plane = 0.0f;
@@ -828,33 +813,91 @@ void level_step(Level *level, float dt)
                 else
                 {
                     // Move the remaining distance along the plane
-                    distance_along_standing_plane += movement_distance_remaining * (current_speed > 0.0f) ? 1.0f : -1.0f;
+                    float direction = (current_velocity > 0.0f) ? 1.0f : -1.0f;
+                    distance_along_standing_plane += movement_distance_remaining * direction;
                     movement_distance_remaining = 0.0f;
                 }
             }
-
-            v2 standing_plane_direction = normalize(*standing_plane->b - *standing_plane->a);
-            player->position = *standing_plane->a + standing_plane_direction * distance_along_standing_plane;
-
             player->standing_plane = standing_plane;
             player->distance_along_standing_plane = distance_along_standing_plane;
+
+            // Set the player position on the plane
+            v2 standing_plane_direction = normalize(*standing_plane->b - *standing_plane->a);
+            v2 target_position = *standing_plane->a + standing_plane_direction * distance_along_standing_plane;
+
+            player->position = target_position;
+            player->position += v2(0.0f, player->vertical_speed) * dt; // If the player jumped, move up
+
+            v2 standing_plane_normal = find_ccw_normal(normalize(*player->standing_plane->b - *player->standing_plane->a));
+            float max_slope_angle = PI / 4.0f;
+            float plane_angle = angle_between(-standing_plane_normal, v2(0.0f, 1.0f));
+            if(plane_angle > max_slope_angle)
+            {
+                player->grounded = false;
+            }
         }
         else
         {
             /*
-            if will move into wall
+               if will move into wall
 
-                move only up until the wall
+               move only up until the wall
 
-                if the wall is ground
-                    set to move on ground
+               if the wall is ground
+               set to move on ground
             */
+            for(int iteration = 0; iteration < 4; iteration++)
+            {
+                // Collision detection and resolution
+                Collision collision_data[16] = {};
+                Collision *collision_end = &(collision_data[0]);
+
+
+                int num_chunks = level->static_level_geometry->num_chunks;
+                LevelGeometryChunk **chunks = level->static_level_geometry->chunks;
+                for(int i = 0; i < num_chunks; i++)
+                {
+                    LevelGeometryChunk *chunk = chunks[i];
+                    int num_planes = chunk->num_physical_planes;
+                    Line *planes = chunk->physical_planes;
+                    for(int j = 0; j < num_planes; j++)
+                    {
+                        Line *plane = &(planes[j]);
+
+                        //v2 player_bl = player->position + v2(-player->full_extents.x / 2.0f, 0.0f);
+                        //v2 player_tr = player->position + v2( player->full_extents.x / 2.0f, player->full_extents.y);
+                        //bool hit = box_line_collision(player_bl, player_tr, *plane->a, *plane->b, collision_end);
+                        v2 pos = player->position + v2(0.0f, player->full_extents.y / 2.0f);
+                        bool hit = cylinder_line_collision(pos, player->full_extents, *plane->a, *plane->b, collision_end);
+                        if(hit)
+                        {
+                            collision_end++;
+                        }
+                        //draw_line(renderer_state, *plane->a, *plane->b, v4(0, 1, 0, 1));
+                    }
+                }
+
+                int num_collisions = collision_end - &(collision_data[0]);
+                for(int i = 0; i < num_collisions; i++)
+                {
+                    Collision *collision = &(collision_data[i]);
+
+                    float max_slope_angle = PI / 4.0f;
+                    float plane_angle = angle_between(collision->resolution_direction, v2(0.0f, 1.0f));
+
+                    if(absf(plane_angle) < max_slope_angle)
+                    {
+                        player->grounded = true;
+                        player->vertical_speed = 0.0f;
+                    }
+
+                    player->position += collision->resolution_direction * collision->depth * 0.75f;
+                }
+
+            }
+
+            player->position += v2(player->horizontal_speed, player->vertical_speed) * dt;
         }
-
-
-
-
-
 
 
 
