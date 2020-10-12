@@ -267,6 +267,14 @@ static float angle_between(v2 a, v2 b) { return (float)acos(dot(normalize(a), no
 static float angle_between(v3 a, v3 b) { return (float)acos(dot(normalize(a), normalize(b))); }
 static float angle_between(v4 a, v4 b) { return (float)acos(dot(normalize(a), normalize(b))); }
 
+static v2 slerp(v2 a, v2 b, float t)
+{
+    float angle = angle_between(a, b);
+    v2 t1 = (sinf((1.0f - t) * angle) / sinf(angle)) * a;
+    v2 t2 = (sinf(t * angle) / sinf(angle)) * b;
+    return t1 + t2;
+}
+
 // Returns this vector clamped by max length
 static v2 clamp_length(v2 v, float max_length)
 {

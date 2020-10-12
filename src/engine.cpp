@@ -6,6 +6,11 @@
 #include "memory.h"
 #include "my_math.h"
 
+// DEBUG
+#include "imgui.h"
+#include "examples/imgui_impl_win32.h"
+#include "examples/imgui_impl_opengl3.h"
+
 #include "level.h"
 
 
@@ -61,9 +66,42 @@ static void init_game_state()
     game_state->hook_unlocked = false;
 }
 
+static void init_imgui()
+{
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    
+    // Setup Dear ImGui style
+    ImGui::StyleColorsDark();
+    //ImGui::StyleColorsClassic();
+    
+    // Setup Platform/Renderer bindings
+    ImGui_ImplOpenGL3_Init("#version 440 core");
+    ImGui_ImplWin32_Init(get_window_handle(get_engine_platform_state()));
+}
+
+static void imgui_begin_frame()
+{
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+}
+
+static void imgui_end_frame()
+{
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
 static void do_one_step(float time_step)
 {
     clear_frame(game_state->renderer_state, v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
+    imgui_begin_frame();
+    
+    ImGui::Begin("Debug");
 
     read_input(game_state->input_state);
 
@@ -73,6 +111,9 @@ static void do_one_step(float time_step)
 
 
 
+    ImGui::End();
+
+    imgui_end_frame();
     swap_frames(game_state->renderer_state);
 }
 
@@ -81,6 +122,7 @@ static void do_one_step(float time_step)
 void start_engine()
 {
     init_game_state();
+    init_imgui();
 
 
     seed_random(0);
