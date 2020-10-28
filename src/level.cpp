@@ -38,10 +38,12 @@ struct Player
     float drag_strength;
     float jump_strength;
 
+    float max_slope;
+
     bool grounded;
     struct LevelGeometryChunk *standing_chunk;
     Line *standing_plane;
-    float distance_along_standing_plane;
+    float standing_plane_t;
 };
 
 struct Triangle
@@ -107,8 +109,8 @@ struct Level
     // Kinematic level geometry affects kinematics, collisions, squishing, etc.
     // It makes sense to split this up into two different data structures rather than have them posses
     // generic "collider components"
-    StaticLevelGeometry *static_level_geometry;
-    KinematicLevelGeometry *kinematic_level_geometry;
+    StaticLevelGeometry *static_geometry;
+    KinematicLevelGeometry *kinematic_geometry;
 
     int num_enemies;
     Enemy *enemies;
@@ -125,22 +127,28 @@ static float length(Line *a)
     return length(*a->b - *a->a);
 }
 
+static v2 find_ccw_normal(Line *line)
+{
+    return find_ccw_normal(normalize(*line->b - *line->a));
+}
+
 static void reset_player(Player *player, LevelGeometryChunk *start_chunk, Line *start_plane)
 {
     player->position = v2(2.0f, 2.0f);
-    player->full_extents = v2(1.0f, 2.0f) * 2.0f;
-    //player->acceleration_strength = 32.0f;
-    player->acceleration_strength = 4.0f;
+    player->full_extents = v2(1.0f, 2.0f) * 0.5f;
+    player->acceleration_strength = 32.0f;
     player->horizontal_speed = 0.0f;
     player->vertical_speed = 0.0f;
     player->friction_strength = 12.0f;
     player->drag_strength = 0.5f;
     player->jump_strength = 5.0f;
 
+    player->max_slope = 0.707;
+
     player->grounded = true;
     player->standing_chunk = start_chunk;
     player->standing_plane = start_plane;
-    player->distance_along_standing_plane = length(start_plane) / 2.0f;
+    player->standing_plane_t = 0.5f;
 }
 
 static LevelGeometryChunk *create_piece_of_level_geometry()
@@ -516,7 +524,7 @@ static void render_level(Level *level)
             v4(0.0f, 0.8f, 0.0f, 1.0f));
 #endif
 
-    LevelGeometryChunk *chunk = level->static_level_geometry->chunks[0];
+    LevelGeometryChunk *chunk = level->static_geometry->chunks[0];
     /*
     draw_triangles(
             renderer_state, chunk->num_vertices, chunk->vertices,
@@ -554,12 +562,12 @@ Level *create_level(/*...*/)
 
     level->paused = false;
 
-    level->static_level_geometry = (StaticLevelGeometry *)my_allocate(sizeof(StaticLevelGeometry));
-    level->static_level_geometry->num_chunks = 1;
-    level->static_level_geometry->chunks = (LevelGeometryChunk **)my_allocate(sizeof(LevelGeometryChunk *) * level->static_level_geometry->num_chunks);
-    level->static_level_geometry->chunks[0] = create_piece_of_level_geometry();
+    level->static_geometry = (StaticLevelGeometry *)my_allocate(sizeof(StaticLevelGeometry));
+    level->static_geometry->num_chunks = 1;
+    level->static_geometry->chunks = (LevelGeometryChunk **)my_allocate(sizeof(LevelGeometryChunk *) * level->static_geometry->num_chunks);
+    level->static_geometry->chunks[0] = create_piece_of_level_geometry();
 
-    level->kinematic_level_geometry = (KinematicLevelGeometry *)my_allocate(sizeof(KinematicLevelGeometry));
+    level->kinematic_geometry = (KinematicLevelGeometry *)my_allocate(sizeof(KinematicLevelGeometry));
     // ...
 
     level->num_enemies = 0;
@@ -568,8 +576,8 @@ Level *create_level(/*...*/)
 
     level->player = (Player *)my_allocate(sizeof(Player)); 
     reset_player(level->player,
-            level->static_level_geometry->chunks[0],
-            &(level->static_level_geometry->chunks[0]->physical_planes[3]));
+            level->static_geometry->chunks[0],
+            &(level->static_geometry->chunks[0]->physical_planes[3]));
 
     // ...
 
@@ -595,8 +603,8 @@ void level_step(Level *level, float dt)
     if(key_toggled_down(input_state, 'R'))
     {
         reset_player(level->player,
-                level->static_level_geometry->chunks[0],
-                &(level->static_level_geometry->chunks[0]->physical_planes[3]));
+                level->static_geometry->chunks[0],
+                &(level->static_geometry->chunks[0]->physical_planes[3]));
     }
 
     if(level->paused)
@@ -662,24 +670,21 @@ void level_step(Level *level, float dt)
     render_level(level);
 }
 
+// Here for figuring out how to move a circle along a plane corner
+#if 0
 static float delta_plane_length(Line *p1, Line *p2, float player_radius)
 {
     float angle_between_planes = angle_between(*p1->b - *p1->a, *p2->b - *p2->a);
     float delta = angle_between_planes * player_radius * 0.5f; // Half of the arc length made by the planes
     return delta;
 }
+#endif
 
 static float find_distance_to_end(Player *player, Line *next_plane, bool moving_forward)
 {
-    float standing_plane_length = length(*player->standing_plane->b - *player->standing_plane->a);
-    float delta = delta_plane_length(player->standing_plane, next_plane, player->full_extents.x / 2.0f);
-    
-    float start_of_current_plane = -delta;
-    float end_of_current_plane = standing_plane_length + delta;
-
     float distance_to_end = (moving_forward) ?
-        (end_of_current_plane - player->distance_along_standing_plane) :
-        (player->distance_along_standing_plane - start_of_current_plane);
+        (1.0f - player->standing_plane_t) :
+        (player->standing_plane_t);
 
     return distance_to_end;
 }
@@ -687,7 +692,11 @@ static float find_distance_to_end(Player *player, Line *next_plane, bool moving_
 static void move_along_plane(Player *player, bool moving_forward, float *movement_distance_remaining)
 {
     float direction = (moving_forward) ? 1.0f : -1.0f;
-    player->distance_along_standing_plane += *movement_distance_remaining * direction;
+    float standing_plane_length = length(player->standing_plane);
+
+    float t_dist_to_move = *movement_distance_remaining / standing_plane_length;
+
+    player->standing_plane_t += t_dist_to_move * direction;
     *movement_distance_remaining = 0.0f;
 }
 
@@ -696,22 +705,13 @@ static void move_to_next_plane(Player *player, bool moving_forward, Line *next_p
 {
     *movement_distance_remaining -= distance_to_end;
 
-    float delta = delta_plane_length(player->standing_plane, next_plane, player->full_extents.x / 2.0f);
-    float start_of_next_plane = -delta;
-    float end_of_next_plane = length(next_plane) + delta;
-    player->distance_along_standing_plane = (moving_forward) ?
-        (start_of_next_plane) :
-        (end_of_next_plane);
-
+    player->standing_plane_t = (moving_forward) ?  (0.0f) : (1.0f);
     player->standing_plane = next_plane;
 }
 
 static void do_ground_movement(Level *level, Player *player, float dt)
 {
     RendererState *renderer_state = get_engine_renderer_state();
-
-    //ImGui::Text("distance along standing plane: %f", &player->distance_along_standing_plane);
-    ImGui::Text("distance along standing plane: %f", player->distance_along_standing_plane);
 
     float current_velocity = player->horizontal_speed * dt;
     float movement_distance_remaining = absf(current_velocity);
@@ -737,128 +737,73 @@ static void do_ground_movement(Level *level, Player *player, float dt)
             // Move player to next plane
             move_to_next_plane(player, moving_forward, next_plane, distance_to_end, &movement_distance_remaining);
         }
-    }
-
-    // Set the player position on the plane
-    if(player->distance_along_standing_plane < 0.0f)
-    {
-        Line *next_plane = get_previous_plane(player->standing_chunk, player->standing_plane);
-        float player_radius = player->full_extents.x / 2.0f;
-        float delta = delta_plane_length(player->standing_plane, next_plane, player_radius);
-
-        v2 standing_plane_normal = find_ccw_normal(normalize(*player->standing_plane->b - *player->standing_plane->a));
-        v2 next_plane_normal = find_ccw_normal(normalize(*next_plane->b - *next_plane->a));
-        v2 average_normal = (standing_plane_normal + next_plane_normal) / 2.0f;
-        average_normal = normalize(average_normal);
-
-        float t = inv_lerp(0.0f, -delta, player->distance_along_standing_plane);
-        v2 shoe_offset = slerp(standing_plane_normal, average_normal, t);
-        v2 p = *player->standing_plane->a;
-        v2 shoe_position = p + shoe_offset;
-
-        player->position = shoe_position - v2(0.0f, player_radius);
-
-        draw_line(renderer_state, p, p + standing_plane_normal, v4(1, 1, 1, 1));
-        draw_line(renderer_state, p, p + next_plane_normal, v4(1, 1, 1, 1));
-        draw_line(renderer_state, p, p + average_normal, v4(1, 1, 0, 1));
-        draw_line(renderer_state, p, p + shoe_offset, v4(1, 1, 1, 1));
 
     }
-    else if(player->distance_along_standing_plane < length(player->standing_plane))
-    {
-        v2 plane_direction = normalize(*player->standing_plane->b - *player->standing_plane->a);
-        v2 plane_normal = find_ccw_normal(plane_direction);
-        float player_radius = player->full_extents.x / 2.0f;
-        v2 target = (*player->standing_plane->a + plane_direction * player->distance_along_standing_plane)
-            - v2(0.0f, player_radius) + plane_normal * player_radius;
-        player->position = target;
-    }
-    else
-    {
-        Line *next_plane = get_next_plane(player->standing_chunk, player->standing_plane);
-        float player_radius = player->full_extents.x / 2.0f;
-        float delta = delta_plane_length(player->standing_plane, next_plane, player_radius);
 
-        v2 standing_plane_normal = find_ccw_normal(normalize(*player->standing_plane->b - *player->standing_plane->a));
-        v2 next_plane_normal = find_ccw_normal(normalize(*next_plane->b - *next_plane->a));
-        v2 average_normal = (standing_plane_normal + next_plane_normal) / 2.0f;
-        average_normal = normalize(average_normal);
-
-        float t = inv_lerp(length(player->standing_plane), length(player->standing_plane) + delta,
-                player->distance_along_standing_plane);
-        v2 shoe_offset = slerp(standing_plane_normal, average_normal, t);
-        v2 p = *player->standing_plane->b;
-        v2 shoe_position = p + shoe_offset;
-
-        player->position = shoe_position - v2(0.0f, player_radius);
-
-        draw_line(renderer_state, p, p + standing_plane_normal, v4(1, 1, 1, 1));
-        draw_line(renderer_state, p, p + next_plane_normal, v4(1, 1, 1, 1));
-        draw_line(renderer_state, p, p + average_normal, v4(1, 1, 0, 1));
-        draw_line(renderer_state, p, p + shoe_offset, v4(1, 1, 1, 1));
-    }
+    v2 on_plane_position = lerp(*player->standing_plane->a, *player->standing_plane->b, player->standing_plane_t);
+    player->position = on_plane_position;
 }
 
 static void do_freefall_movement(Level *level, Player *player, float dt)
 {
-    /*
-       if will move into wall
+    v2 velocity = v2(player->horizontal_speed, player->vertical_speed) * dt;
+    v2 old_player_position = player->position;
+    v2 new_player_position = player->position + velocity;
 
-       move only up until the wall
+    player->position = new_player_position;
 
-       if the wall is ground
-       set to move on ground
-       */
-    for(int iteration = 0; iteration < 4; iteration++)
+    bool hit_plane = false;
+    LevelGeometryChunk *collided_chunk = nullptr;
+    Line *closest_plane = nullptr;
+    v2 hit_point;
+    float min_dist = INFINITY;
+    for(int chunk_index = 0; chunk_index < level->static_geometry->num_chunks; chunk_index++)
     {
-        // Collision detection and resolution
-        Collision collision_data[16] = {};
-        Collision *collision_end = &(collision_data[0]);
+        LevelGeometryChunk *chunk = level->static_geometry->chunks[chunk_index];
 
-
-        int num_chunks = level->static_level_geometry->num_chunks;
-        LevelGeometryChunk **chunks = level->static_level_geometry->chunks;
-        for(int i = 0; i < num_chunks; i++)
+        for(int plane_index = 0; plane_index < chunk->num_physical_planes; plane_index++)
         {
-            LevelGeometryChunk *chunk = chunks[i];
-            int num_planes = chunk->num_physical_planes;
-            Line *planes = chunk->physical_planes;
-            for(int j = 0; j < num_planes; j++)
-            {
-                Line *plane = &(planes[j]);
+            Line *plane = &(chunk->physical_planes[plane_index]);
+            v2 plane_normal = find_ccw_normal(plane);
 
-                //v2 player_bl = player->position + v2(-player->full_extents.x / 2.0f, 0.0f);
-                //v2 player_tr = player->position + v2( player->full_extents.x / 2.0f, player->full_extents.y);
-                //bool hit = box_line_collision(player_bl, player_tr, *plane->a, *plane->b, collision_end);
-                v2 pos = player->position + v2(0.0f, player->full_extents.y / 2.0f);
-                bool hit = capsule_line_collision(pos, player->full_extents, *plane->a, *plane->b, collision_end);
+            if(dot(plane_normal, velocity) < 0.0f)
+            {
+                v2 plane_hit_point;
+                bool hit = line_line_collision(old_player_position, new_player_position, *plane->a, *plane->b, &plane_hit_point);
                 if(hit)
                 {
-                    collision_end++;
+                    float dist = distance(old_player_position, plane_hit_point);
+                    if(dist < min_dist)
+                    {
+                        hit_plane = true;
+                        collided_chunk = chunk;
+                        closest_plane = plane;
+                        hit_point = plane_hit_point;
+                        min_dist = dist;
+                    }
                 }
-                //draw_line(renderer_state, *plane->a, *plane->b, v4(0, 1, 0, 1));
             }
         }
-
-        int num_collisions = collision_end - &(collision_data[0]);
-        for(int i = 0; i < num_collisions; i++)
-        {
-            Collision *collision = &(collision_data[i]);
-
-            float max_slope_angle = PI / 4.0f;
-            float plane_angle = angle_between(collision->resolution_direction, v2(0.0f, 1.0f));
-
-            if(absf(plane_angle) < max_slope_angle)
-            {
-                player->grounded = true;
-                player->vertical_speed = 0.0f;
-            }
-
-            player->position += collision->resolution_direction * collision->depth * 0.75f;
-        }
-
     }
 
-    player->position += v2(player->horizontal_speed, player->vertical_speed) * dt;
+    if(hit_plane)
+    {
+        v2 hit_plane_normal = find_ccw_normal(closest_plane);
+        if(dot(hit_plane_normal, v2(1.0f, 0.0f)) < player->max_slope)
+        {
+            player->grounded = true;
+            player->standing_chunk = collided_chunk;
+            player->standing_plane = closest_plane;
+            player->standing_plane_t = distance(hit_point, *closest_plane->a) / length(closest_plane);
+
+            player->position = hit_point; // Shouldn't have to do this here
+        }
+        else
+        {
+            //v2 hit_plane_direction = normalize(*closest_plane->b - *closest_plane->a);
+            //v2 
+            player->position = hit_point + hit_plane_normal * 0.1f; // Shouldn't have to do this here
+        }
+    }
 }
 

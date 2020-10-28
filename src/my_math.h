@@ -215,6 +215,10 @@ static float length(v4 v)
     return sqrtf(squared(v.x) + squared(v.y) + squared(v.z) + squared(v.w));
 }
 
+static float distance(v2 a, v2 b) { return length(a - b); }
+static float distance(v3 a, v3 b) { return length(a - b); }
+static float distance(v4 a, v4 b) { return length(a - b); }
+
 // Gets the squared length of this vector
 static float length_squared(v2 v)
 {
