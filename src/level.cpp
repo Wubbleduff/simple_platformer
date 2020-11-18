@@ -17,6 +17,9 @@ struct v2i
         struct { int x, y; };
         int v[2];
     };
+
+    v2i() {}
+    v2i(int a, int b) : x(a), y(b) {}
 };
 
 struct Grid
@@ -26,6 +29,8 @@ struct Grid
         bool filled;
     };
 
+    // How big is a grid cell in world space?
+    float world_scale;
     int width, height;
     Cell *cells;
 
@@ -38,19 +43,42 @@ struct Grid
         cells = (Cell *)calloc(sizeof(Cell), w * h);
     }
 
+    void clear()
+    {
+        for(int i = 0; i < width * height; i++) cells[i].filled = false;
+    }
+
     Cell *at(v2i pos)
     {
-        return &(cells[pos.row * width + pos.col]);
+        return &(cells[pos.y * width + pos.x]);
+    }
+
+    v2 cell_to_world(v2i pos)
+    {
+        v2 world_pos = v2((float)pos.x, (float)pos.y);
+        return world_pos * world_scale;
+    }
+
+    v2i world_to_cell(v2 pos)
+    {
+        pos *= (1.0f / world_scale);
+        v2i cell = v2i((int)pos.x, (int)pos.y);
+        return cell;
     }
 };
 
 struct Player
 {
     v2 position;
-    v2 velocity;
+    bool grounded;
 
-    float acceleration_strength;
+    float horizontal_velocity;
+    float vertical_velocity;
+
+    float run_strength;
     float friction_strength;
+    float mass;
+    float gravity;
 
     float full_extent;
 
@@ -65,69 +93,201 @@ struct Level
     Player player;
 };
 
+
+static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
+{
+    float a_left   = a_bl.x;
+    float a_right  = a_tr.x;
+    float a_top    = a_tr.y;
+    float a_bottom = a_bl.y;
+
+    float b_left   = b_bl.x;
+    float b_right  = b_tr.x;
+    float b_top    = b_tr.y;
+    float b_bottom = b_bl.y;
+
+    float left_diff   = a_left - b_right;
+    float right_diff  = b_left - a_right;
+    float top_diff    = b_bottom - a_top;
+    float bottom_diff = a_bottom - b_top;
+
+    float max_depth = max(left_diff, max(right_diff, max(top_diff, bottom_diff)));
+
+    if(max_depth > 0.0f)
+    {
+        return false;
+    }
+
+    if(max_depth == left_diff)   { *dir = v2(-1.0f,  0.0f); }
+    if(max_depth == right_diff)  { *dir = v2( 1.0f,  0.0f); }
+    if(max_depth == top_diff)    { *dir = v2( 0.0f,  1.0f); }
+    if(max_depth == bottom_diff) { *dir = v2( 0.0f, -1.0f); }
+
+    *depth = -max_depth;
+
+    return true;
+}
+
+static void reset_level(Level *level)
+{
+    level->grid.world_scale = 1.0f;
+
+    level->grid.clear();
+    for(v2i pos = {0, 0}; pos.x < level->grid.width; pos.x++)
+    {
+        level->grid.at(pos)->filled = true;
+    }
+
+    level->player.position = v2(0.0f, 4.0f);
+    level->player.grounded = false;
+
+    level->player.horizontal_velocity = 0.0f;
+    level->player.vertical_velocity = 0.0f;
+
+    level->player.run_strength = 256.0f;
+    level->player.friction_strength = 16.0f;
+    level->player.mass = 4.0f;
+    level->player.gravity = 9.81f;
+
+    level->player.full_extent = 1.0f;
+    level->player.color = v4(1.0f, 0.0f, 0.5f, 1.0f);
+}
+
+
+
 Level *create_level()
 {
     Level *level = (Level *)malloc(sizeof(Level));
 
     level->grid.init(256, 256);
 
-    
-    for(v2i pos = {level->grid.height / 2, 0}; pos.col < level->grid.width; pos.col++)
-    {
-        level->grid.at(pos)->filled = true;
-    }
-
-    level->player.position = v2(0.0f, 1.5f);
-    level->player.velocity = v2();
-    level->player.acceleration_strength = 256.0f;
-    level->player.friction_strength = 16.0f;
-    level->player.full_extent = 1.0f;
-    level->player.color = v4(1.0f, 0.0f, 0.5f, 1.0f);
+    reset_level(level);
 
     return level;
 }
 
 void level_step(Level *level, float dt)
 {
+
     InputState *input_state = get_engine_input_state();
+
+    if(key_toggled_down(input_state, 'R'))
+    {
+        reset_level(level);
+    }
+
+    if(mouse_state(input_state, 0))
+    {
+        v2i cell = level->grid.world_to_cell(mouse_world_position(input_state));
+        level->grid.at(cell)->filled = true;
+    }
+
     Player *player = &(level->player);
 
-    v2 acceleration = v2();
+    float horizontal_acceleration = 0.0f;
+    float vertical_acceleration = 0.0f;
+
     if(key_state(input_state, 'D'))
     {
-        acceleration.x += player->acceleration_strength * dt;
+        horizontal_acceleration += player->run_strength;
     }
     if(key_state(input_state, 'A'))
     {
-        acceleration.x -= player->acceleration_strength * dt;
+        horizontal_acceleration -= player->run_strength;
+    }
+    
+    if(key_toggled_down(input_state, ' '))
+    {
+        player->vertical_velocity = 20.0f;
+        player->grounded = false;
     }
 
-    acceleration -= player->velocity * player->friction_strength * dt;
 
-    player->velocity += acceleration;
-    player->position += player->velocity * dt;
+    if(player->grounded)
+    {
+        player->vertical_velocity = 0.0f;
+    }
+    else
+    {
+        //vertical_acceleration -= player->gravity * player->mass;
+    }
+    vertical_acceleration -= player->gravity * player->mass;
 
+    horizontal_acceleration -= player->horizontal_velocity * player->friction_strength;
+
+    player->horizontal_velocity += horizontal_acceleration * dt;
+    player->vertical_velocity += vertical_acceleration * dt;
+
+    player->position.x += player->horizontal_velocity * dt;
+    player->position.y += player->vertical_velocity * dt;
 
 
     RendererState *renderer_state = get_engine_renderer_state();
+
+    {
+        v2 player_bl = player->position - v2(1.0f, 1.0f) * player->full_extent * 0.5f;
+        v2 player_tr = player->position + v2(1.0f, 1.0f) * player->full_extent * 0.5f;
+
+        bool hit_ground = false;
+        bool hit_ceiling = false;
+        bool hit_wall = false;
+        v2 resolution_vector = v2();
+        for(v2i cell = {0, 0}; cell.row < level->grid.height; cell.row++)
+        {
+            for(cell.col = 0; cell.col < level->grid.width; cell.col++)
+            {
+                if(level->grid.at(cell)->filled)
+                {
+                    v2 cell_world_position = level->grid.cell_to_world(cell);
+
+                    v2 cell_bl = cell_world_position;
+                    v2 cell_tr = cell_world_position + v2(1.0f, 1.0f) * level->grid.world_scale;
+
+                    v2 dir;
+                    float depth;
+                    bool collision = aabb(cell_bl, cell_tr, player_bl, player_tr, &dir, &depth);
+                    if(collision)
+                    {
+                        resolution_vector += dir * depth;
+
+                        if(dir.x == 0.0f && dir.y == 1.0f) hit_ground = true;
+                        if(dir.x == 0.0f && dir.y == -1.0f) hit_ceiling = true;
+                        if(absf(dir.x == 1.0f)) hit_wall = true;
+                    }
+
+                }
+            }
+        }
+
+        if(hit_ceiling) player->vertical_velocity = 0.0f;
+        if(hit_wall) player->horizontal_velocity = 0.0f;
+
+        player->position += resolution_vector;
+        player->grounded = hit_ground;
+    }
+
+
+
+
+    v2 camera_offset = v2(16.0f, 4.0f);
     set_camera_width(renderer_state, 64.0f);
-    set_camera_position(renderer_state, v2(24.0f, 14.0f));
+    set_camera_position(renderer_state, player->position + camera_offset);
+
+    draw_quad(renderer_state, v2(), v2(0.25f, 0.25f), PI / 4.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
+
+#if 1
     for(v2i pos = {0, 0}; pos.row < level->grid.height; pos.row++)
     {
         for(pos.col = 0; pos.col < level->grid.width; pos.col++)
         {
             if(level->grid.at(pos)->filled)
             {
-                float level_width = 256.0f;
-                v2 world_pos = remap( v2(pos.col, pos.row),
-                        v2( 0.0f, 0.0f), v2(255.0f, 255.0f),
-                        v2(-level_width/2.0f, level_width/2.0f), v2(level_width/2.0f, -level_width/2.0f) );
-                float scale = (level_width / level->grid.width) * 0.9f;
-
                 float inten = (float)pos.col / level->grid.width;
                 v4 color = v4(1.0f - inten, 0.0f, inten, 1.0f);
                 if(pos.col == level->grid.width / 2) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
 
+                v2 world_pos = level->grid.cell_to_world(pos) + v2(1.0f, 1.0f) * level->grid.world_scale / 2.0f;
+                float scale = level->grid.world_scale * 0.95f;
                 draw_quad(renderer_state, world_pos, v2(scale, scale), 0.0f, color);
             }
         }
@@ -135,7 +295,38 @@ void level_step(Level *level, float dt)
 
     draw_quad(renderer_state, player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
 
-    draw_quad(renderer_state, v2(), v2(0.25f, 0.25f), PI / 4.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
+#endif
 
+
+#if 0
+    v2 a_bl = v2(-1.0f, -1.0f);
+    v2 a_tr = v2( 1.0f,  1.0f);
+
+    v2 mouse_pos = mouse_world_position(input_state);
+
+    v2 b_bl = v2(-1.0f, -1.0f) + mouse_pos;
+    v2 b_tr = v2( 1.0f,  1.0f) + mouse_pos;
+
+    v2 dir;
+    float depth;
+    bool hit = aabb(a_bl, a_tr, b_bl, b_tr, &dir, &depth);
+
+    v4 color = v4(1.0f, 0.0f, 0.0f, 1.0f);
+    if(hit)
+    {
+        color = v4(0.0f, 1.0f, 0.0f, 1.0f);
+    }
+
+    v2 a_center = (a_bl + a_tr) / 2.0f;
+    v2 b_center = (b_bl + b_tr) / 2.0f;
+    draw_quad(renderer_state, a_center, a_tr - a_bl, 0.0f, color);
+    draw_quad(renderer_state, b_center, b_tr - b_bl, 0.0f, color);
+
+    if(hit)
+    {
+        draw_line(renderer_state, a_tr, a_tr + (dir * depth), v4(1.0f, 1.0f, 0.0f, 1.0f));
+        draw_quad(renderer_state, b_center + dir * depth, b_tr - b_bl, 0.0f, v4(0.0f, 1.0f, 0.0f, 0.5f));
+    }
+#endif
 }
 

@@ -9,7 +9,10 @@ EXE=engine.exe
 
 PDB=engine.pdb
 
-SOURCE=src/main.cpp src/engine.cpp src/memory.cpp src/my_algorithms.cpp src/input.cpp src/renderer.cpp src/shader.cpp src/level.cpp lib/imgui/imgui.cpp lib/imgui/imgui_demo.cpp lib/imgui/imgui_draw.cpp lib/imgui/imgui_widgets.cpp lib/imgui/examples/imgui_impl_opengl3.cpp lib/imgui/examples/imgui_impl_win32.cpp
+#SOURCE=src/main.cpp src/engine.cpp src/memory.cpp src/my_algorithms.cpp src/input.cpp src/renderer.cpp src/shader.cpp src/level.cpp lib/imgui/imgui.cpp lib/imgui/imgui_demo.cpp lib/imgui/imgui_draw.cpp lib/imgui/imgui_widgets.cpp lib/imgui/examples/imgui_impl_opengl3.cpp lib/imgui/examples/imgui_impl_win32.cpp
+#SOURCE=compile_unit.cpp lib/imgui/imgui.cpp lib/imgui/imgui_demo.cpp lib/imgui/imgui_draw.cpp lib/imgui/imgui_widgets.cpp lib/imgui/examples/imgui_impl_opengl3.cpp lib/imgui/examples/imgui_impl_win32.cpp
+SOURCE=compile_unit.cpp
+
 
 INCLUDE_DIRS=/I"src" /I"lib/glew-2.1.0/include" /I"lib/imgui" /I"lib/stb"
 
@@ -56,6 +59,11 @@ release: | intermediate $(RELEASE_RUN_TREE)
 	cp -f $(DLL_GLEW) $(RELEASE_RUN_TREE)
 	cp -rf textures/ $(RELEASE_RUN_TREE)
 	cp -rf shaders/ $(RELEASE_RUN_TREE)
+
+imgui: | intermediate
+	cl $(OPTIMIZED_DEBUG_COMPILE_FLAGS) /I"lib/imgui" /I"lib/glew-2.1.0/include" /D"IMGUI_IMPL_OPENGL_LOADER_GLEW" lib/imgui/imgui.cpp lib/imgui/imgui_demo.cpp lib/imgui/imgui_draw.cpp lib/imgui/imgui_widgets.cpp lib/imgui/examples/imgui_impl_opengl3.cpp lib/imgui/examples/imgui_impl_win32.cpp
+	link $(DEBUG_LINK_FLAGS) $(LIBS) $(INTERMEDIATE)*.obj
+
 
 clean: | intermediate
 	rm -f $(INTERMEDIATE)*.obj
