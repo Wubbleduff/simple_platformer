@@ -17,7 +17,6 @@ struct Shader
 
 
 
-/*
 static void check_gl_errors(const char *desc)
 {
     GLint error = glGetError();
@@ -27,7 +26,6 @@ static void check_gl_errors(const char *desc)
         assert(false);
     }
 }
-*/
 
 static bool is_newline(char *c)
 {

@@ -9,6 +9,8 @@
 
 #include "imgui.h"
 
+#include <vector>
+
 struct v2i
 {
     union
@@ -20,6 +22,9 @@ struct v2i
 
     v2i() {}
     v2i(int a, int b) : x(a), y(b) {}
+
+    v2i operator+(v2i b) { return v2i(x + b.x, y + b.y); }
+    v2i operator-(v2i b) { return v2i(x - b.x, y - b.y); }
 };
 
 struct Grid
@@ -111,7 +116,7 @@ static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
     float top_diff    = b_bottom - a_top;
     float bottom_diff = a_bottom - b_top;
 
-    float max_depth = max(left_diff, max(right_diff, max(top_diff, bottom_diff)));
+    float max_depth = max_float(left_diff, max_float(right_diff, max_float(top_diff, bottom_diff)));
 
     if(max_depth > 0.0f)
     {
@@ -196,16 +201,17 @@ void level_step(Level *level, float dt)
         horizontal_acceleration -= player->run_strength;
     }
     
-    if(key_toggled_down(input_state, ' '))
-    {
-        player->vertical_velocity = 20.0f;
-        player->grounded = false;
-    }
 
 
     if(player->grounded)
     {
         player->vertical_velocity = 0.0f;
+
+        if(key_toggled_down(input_state, ' '))
+        {
+            player->vertical_velocity = 20.0f;
+            player->grounded = false;
+        }
     }
     else
     {
@@ -228,10 +234,11 @@ void level_step(Level *level, float dt)
         v2 player_bl = player->position - v2(1.0f, 1.0f) * player->full_extent * 0.5f;
         v2 player_tr = player->position + v2(1.0f, 1.0f) * player->full_extent * 0.5f;
 
-        bool hit_ground = false;
-        bool hit_ceiling = false;
-        bool hit_wall = false;
-        v2 resolution_vector = v2();
+        std::vector<float> rights;
+        std::vector<float> lefts;
+        std::vector<float> ups;
+        std::vector<float> downs;
+
         for(v2i cell = {0, 0}; cell.row < level->grid.height; cell.row++)
         {
             for(cell.col = 0; cell.col < level->grid.width; cell.col++)
@@ -248,22 +255,58 @@ void level_step(Level *level, float dt)
                     bool collision = aabb(cell_bl, cell_tr, player_bl, player_tr, &dir, &depth);
                     if(collision)
                     {
-                        resolution_vector += dir * depth;
+                        bool blocked = false;
+                        v2 n_dir = normalize(dir);
+                        v2i dir_i = v2i((int)(n_dir.x), (int)(n_dir.y));
+                        if(level->grid.at(cell + dir_i)->filled)
+                        {
+                            blocked = true;
+                        }
 
-                        if(dir.x == 0.0f && dir.y == 1.0f) hit_ground = true;
-                        if(dir.x == 0.0f && dir.y == -1.0f) hit_ceiling = true;
-                        if(absf(dir.x == 1.0f)) hit_wall = true;
+                        if(!blocked)
+                        {
+                            if(dir_i.x ==  1 && dir_i.y ==  0) rights.push_back(depth);
+                            if(dir_i.x == -1 && dir_i.y ==  0) lefts.push_back(depth);
+                            if(dir_i.x ==  0 && dir_i.y ==  1) ups.push_back(depth);
+                            if(dir_i.x ==  0 && dir_i.y == -1) downs.push_back(depth);
+                        }
                     }
-
                 }
             }
         }
 
-        if(hit_ceiling) player->vertical_velocity = 0.0f;
-        if(hit_wall) player->horizontal_velocity = 0.0f;
+        v2 resolution = v2();
+        float max_right = 0.0f;
+        float max_left = 0.0f;
+        float max_up = 0.0f;
+        float max_down = 0.0f;
+        for(float f : rights) { max_right = max_float(f, max_right); }
+        for(float f : lefts)  { max_left  = max_float(f, max_left); }
+        for(float f : ups)    { max_up    = max_float(f, max_up); }
+        for(float f : downs)  { max_down  = max_float(f, max_down); }
+        resolution += v2( 1.0f,  0.0f) * max_right;
+        resolution += v2(-1.0f,  0.0f) * max_left;
+        resolution += v2( 0.0f,  1.0f) * max_up;
+        resolution += v2( 0.0f, -1.0f) * max_down;
 
-        player->position += resolution_vector;
-        player->grounded = hit_ground;
+        player->position += resolution;
+
+        if(length_squared(resolution) == 0.0f)
+        {
+            player->grounded = false;
+        }
+        if(resolution.y > 0.0f && player->vertical_velocity < 0.0f)
+        {
+            player->grounded = true;
+        }
+        if(resolution.y < 0.0f && player->vertical_velocity > 0.0f)
+        {
+            player->vertical_velocity = 0.0f;
+        }
+        if(absf(resolution.x) > 0.0f)
+        {
+            player->horizontal_velocity = 0.0f;
+        }
     }
 
 
