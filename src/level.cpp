@@ -2,10 +2,11 @@
 #include "level.h"
 #include "memory.h"
 #include "my_math.h"
-#include "my_algorithms.h"
-#include "renderer.h"
+#include "algorithms.h"
+#include "graphics.h"
 #include "engine.h"
 #include "input.h"
+#include "serialization.h"
 
 #include "imgui.h"
 
@@ -55,8 +56,34 @@ struct Grid
 
     Cell *at(v2i pos)
     {
-        return &(cells[pos.y * width + pos.x]);
+        int left_bound = -( (width - 1) / 2 ) - 1;
+        int right_bound = (width - 1) / 2;
+
+        int bottom_bound = -( (width - 1) / 2 ) - 1;
+        int top_bound = (width - 1) / 2;
+
+        assert(pos.x >= left_bound && pos.x <= right_bound);
+        assert(pos.y >= bottom_bound && pos.y <= top_bound);
+
+        int array_row = ( (height - 1) - (pos.y + abs(bottom_bound)) );
+        int array_col = pos.x + abs(left_bound);
+
+        return &(cells[array_row * width + array_col]);
     }
+
+    v2i top_left()
+    {
+        int left_bound = -( (width - 1) / 2 ) - 1;
+        int top_bound = (width - 1) / 2;
+        return v2i(left_bound, top_bound);
+    } 
+
+    v2i bottom_right()
+    {
+        int right_bound = (width - 1) / 2;
+        int bottom_bound = -( (width - 1) / 2 ) - 1;
+        return v2i(right_bound, bottom_bound);
+    } 
 
     v2 cell_to_world(v2i pos)
     {
@@ -138,7 +165,7 @@ static void reset_level(Level *level)
     level->grid.world_scale = 1.0f;
 
     level->grid.clear();
-    for(v2i pos = {0, 0}; pos.x < level->grid.width; pos.x++)
+    for(v2i pos = {0, 0}; pos.x < level->grid.width / 2; pos.x++)
     {
         level->grid.at(pos)->filled = true;
     }
@@ -160,6 +187,125 @@ static void reset_level(Level *level)
 
 
 
+static void check_and_resolve_collisions(Level *level)
+{
+    Player *player = &(level->player);
+    v2 player_bl = player->position - v2(1.0f, 1.0f) * player->full_extent * 0.5f;
+    v2 player_tr = player->position + v2(1.0f, 1.0f) * player->full_extent * 0.5f;
+
+    std::vector<float> rights;
+    std::vector<float> lefts;
+    std::vector<float> ups;
+    std::vector<float> downs;
+
+    v2i tl = level->grid.top_left();
+    v2i br = level->grid.bottom_right();
+    for(v2i pos = tl; pos.y >= br.y; pos.y--)
+    {
+        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
+        {
+            if(level->grid.at(pos)->filled)
+            {
+                v2 cell_world_position = level->grid.cell_to_world(pos);
+
+                v2 cell_bl = cell_world_position;
+                v2 cell_tr = cell_world_position + v2(1.0f, 1.0f) * level->grid.world_scale;
+
+                v2 dir;
+                float depth;
+                bool collision = aabb(cell_bl, cell_tr, player_bl, player_tr, &dir, &depth);
+                if(collision)
+                {
+                    bool blocked = false;
+                    v2 n_dir = normalize(dir);
+                    v2i dir_i = v2i((int)(n_dir.x), (int)(n_dir.y));
+                    if(level->grid.at(pos + dir_i)->filled)
+                    {
+                        blocked = true;
+                    }
+
+                    if(!blocked)
+                    {
+                        if(dir_i.x ==  1 && dir_i.y ==  0) rights.push_back(depth);
+                        if(dir_i.x == -1 && dir_i.y ==  0) lefts.push_back(depth);
+                        if(dir_i.x ==  0 && dir_i.y ==  1) ups.push_back(depth);
+                        if(dir_i.x ==  0 && dir_i.y == -1) downs.push_back(depth);
+                    }
+                }
+            }
+        }
+    }
+
+    v2 resolution = v2();
+    float max_right = 0.0f;
+    float max_left = 0.0f;
+    float max_up = 0.0f;
+    float max_down = 0.0f;
+    for(float f : rights) { max_right = max_float(f, max_right); }
+    for(float f : lefts)  { max_left  = max_float(f, max_left); }
+    for(float f : ups)    { max_up    = max_float(f, max_up); }
+    for(float f : downs)  { max_down  = max_float(f, max_down); }
+    resolution += v2( 1.0f,  0.0f) * max_right;
+    resolution += v2(-1.0f,  0.0f) * max_left;
+    resolution += v2( 0.0f,  1.0f) * max_up;
+    resolution += v2( 0.0f, -1.0f) * max_down;
+
+    player->position += resolution;
+
+    if(length_squared(resolution) == 0.0f)
+    {
+        player->grounded = false;
+    }
+    if(resolution.y > 0.0f && player->vertical_velocity < 0.0f)
+    {
+        player->grounded = true;
+    }
+    if(resolution.y < 0.0f && player->vertical_velocity > 0.0f)
+    {
+        player->vertical_velocity = 0.0f;
+    }
+    if(absf(resolution.x) > 0.0f)
+    {
+        player->horizontal_velocity = 0.0f;
+    }
+}
+
+static void render_level(Level *level)
+{
+    Player *player = &(level->player);
+
+    v2 camera_offset = v2(16.0f, 4.0f);
+    Graphics::set_camera_width(64.0f);
+    Graphics::set_camera_position(player->position + camera_offset);
+
+    // Draw the player
+    Graphics::draw_quad(v2(), v2(0.25f, 0.25f), PI / 4.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
+
+    // Draw grid terrain
+    v2i tl = level->grid.top_left();
+    v2i br = level->grid.bottom_right();
+    for(v2i pos = tl; pos.y >= br.y; pos.y--)
+    {
+        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
+        {
+            if(level->grid.at(pos)->filled)
+            {
+                float inten = (float)pos.col / level->grid.width;
+                v4 color = v4(1.0f - inten, 0.0f, inten, 1.0f);
+                if(pos.col == level->grid.width / 2) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
+
+                v2 world_pos = level->grid.cell_to_world(pos) + v2(1.0f, 1.0f) * level->grid.world_scale / 2.0f;
+                float scale = level->grid.world_scale * 0.95f;
+                Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
+            }
+        }
+    }
+
+    Graphics::draw_quad(player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
+}
+
+
+
 Level *create_level()
 {
     Level *level = (Level *)malloc(sizeof(Level));
@@ -174,16 +320,14 @@ Level *create_level()
 void level_step(Level *level, float dt)
 {
 
-    InputState *input_state = get_engine_input_state();
-
-    if(key_toggled_down(input_state, 'R'))
+    if(Input::key_down('R'))
     {
         reset_level(level);
     }
 
-    if(mouse_state(input_state, 0))
+    if(Input::mouse_button(0))
     {
-        v2i cell = level->grid.world_to_cell(mouse_world_position(input_state));
+        v2i cell = level->grid.world_to_cell(Input::mouse_world_position());
         level->grid.at(cell)->filled = true;
     }
 
@@ -192,11 +336,11 @@ void level_step(Level *level, float dt)
     float horizontal_acceleration = 0.0f;
     float vertical_acceleration = 0.0f;
 
-    if(key_state(input_state, 'D'))
+    if(Input::key('D'))
     {
         horizontal_acceleration += player->run_strength;
     }
-    if(key_state(input_state, 'A'))
+    if(Input::key('A'))
     {
         horizontal_acceleration -= player->run_strength;
     }
@@ -207,7 +351,7 @@ void level_step(Level *level, float dt)
     {
         player->vertical_velocity = 0.0f;
 
-        if(key_toggled_down(input_state, ' '))
+        if(Input::key_down(' '))
         {
             player->vertical_velocity = 20.0f;
             player->grounded = false;
@@ -228,148 +372,40 @@ void level_step(Level *level, float dt)
     player->position.y += player->vertical_velocity * dt;
 
 
-    RendererState *renderer_state = get_engine_renderer_state();
+    check_and_resolve_collisions(level);
 
+    render_level(level);
+}
+
+void serialize_level(Level *level, Serialization::Stream *stream)
+{
+    // Write the header
+    Serialization::stream_write(stream, level->grid.width);
+    Serialization::stream_write(stream, level->grid.height);
+    
+
+    // Write the body
+    int i = 0;
+    v2i tl = level->grid.top_left();
+    v2i br = level->grid.bottom_right();
+    for(v2i pos = tl; pos.y >= br.y; pos.y--)
     {
-        v2 player_bl = player->position - v2(1.0f, 1.0f) * player->full_extent * 0.5f;
-        v2 player_tr = player->position + v2(1.0f, 1.0f) * player->full_extent * 0.5f;
-
-        std::vector<float> rights;
-        std::vector<float> lefts;
-        std::vector<float> ups;
-        std::vector<float> downs;
-
-        for(v2i cell = {0, 0}; cell.row < level->grid.height; cell.row++)
-        {
-            for(cell.col = 0; cell.col < level->grid.width; cell.col++)
-            {
-                if(level->grid.at(cell)->filled)
-                {
-                    v2 cell_world_position = level->grid.cell_to_world(cell);
-
-                    v2 cell_bl = cell_world_position;
-                    v2 cell_tr = cell_world_position + v2(1.0f, 1.0f) * level->grid.world_scale;
-
-                    v2 dir;
-                    float depth;
-                    bool collision = aabb(cell_bl, cell_tr, player_bl, player_tr, &dir, &depth);
-                    if(collision)
-                    {
-                        bool blocked = false;
-                        v2 n_dir = normalize(dir);
-                        v2i dir_i = v2i((int)(n_dir.x), (int)(n_dir.y));
-                        if(level->grid.at(cell + dir_i)->filled)
-                        {
-                            blocked = true;
-                        }
-
-                        if(!blocked)
-                        {
-                            if(dir_i.x ==  1 && dir_i.y ==  0) rights.push_back(depth);
-                            if(dir_i.x == -1 && dir_i.y ==  0) lefts.push_back(depth);
-                            if(dir_i.x ==  0 && dir_i.y ==  1) ups.push_back(depth);
-                            if(dir_i.x ==  0 && dir_i.y == -1) downs.push_back(depth);
-                        }
-                    }
-                }
-            }
-        }
-
-        v2 resolution = v2();
-        float max_right = 0.0f;
-        float max_left = 0.0f;
-        float max_up = 0.0f;
-        float max_down = 0.0f;
-        for(float f : rights) { max_right = max_float(f, max_right); }
-        for(float f : lefts)  { max_left  = max_float(f, max_left); }
-        for(float f : ups)    { max_up    = max_float(f, max_up); }
-        for(float f : downs)  { max_down  = max_float(f, max_down); }
-        resolution += v2( 1.0f,  0.0f) * max_right;
-        resolution += v2(-1.0f,  0.0f) * max_left;
-        resolution += v2( 0.0f,  1.0f) * max_up;
-        resolution += v2( 0.0f, -1.0f) * max_down;
-
-        player->position += resolution;
-
-        if(length_squared(resolution) == 0.0f)
-        {
-            player->grounded = false;
-        }
-        if(resolution.y > 0.0f && player->vertical_velocity < 0.0f)
-        {
-            player->grounded = true;
-        }
-        if(resolution.y < 0.0f && player->vertical_velocity > 0.0f)
-        {
-            player->vertical_velocity = 0.0f;
-        }
-        if(absf(resolution.x) > 0.0f)
-        {
-            player->horizontal_velocity = 0.0f;
-        }
-    }
-
-
-
-
-    v2 camera_offset = v2(16.0f, 4.0f);
-    set_camera_width(renderer_state, 64.0f);
-    set_camera_position(renderer_state, player->position + camera_offset);
-
-    draw_quad(renderer_state, v2(), v2(0.25f, 0.25f), PI / 4.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
-
-#if 1
-    for(v2i pos = {0, 0}; pos.row < level->grid.height; pos.row++)
-    {
-        for(pos.col = 0; pos.col < level->grid.width; pos.col++)
+        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
         {
             if(level->grid.at(pos)->filled)
             {
-                float inten = (float)pos.col / level->grid.width;
-                v4 color = v4(1.0f - inten, 0.0f, inten, 1.0f);
-                if(pos.col == level->grid.width / 2) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
-
-                v2 world_pos = level->grid.cell_to_world(pos) + v2(1.0f, 1.0f) * level->grid.world_scale / 2.0f;
-                float scale = level->grid.world_scale * 0.95f;
-                draw_quad(renderer_state, world_pos, v2(scale, scale), 0.0f, color);
+                Serialization::stream_write(stream, '1');
             }
+            else
+            {
+                Serialization::stream_write(stream, '0');
+            }
+
+            i++;
         }
     }
 
-    draw_quad(renderer_state, player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
 
-#endif
-
-
-#if 0
-    v2 a_bl = v2(-1.0f, -1.0f);
-    v2 a_tr = v2( 1.0f,  1.0f);
-
-    v2 mouse_pos = mouse_world_position(input_state);
-
-    v2 b_bl = v2(-1.0f, -1.0f) + mouse_pos;
-    v2 b_tr = v2( 1.0f,  1.0f) + mouse_pos;
-
-    v2 dir;
-    float depth;
-    bool hit = aabb(a_bl, a_tr, b_bl, b_tr, &dir, &depth);
-
-    v4 color = v4(1.0f, 0.0f, 0.0f, 1.0f);
-    if(hit)
-    {
-        color = v4(0.0f, 1.0f, 0.0f, 1.0f);
-    }
-
-    v2 a_center = (a_bl + a_tr) / 2.0f;
-    v2 b_center = (b_bl + b_tr) / 2.0f;
-    draw_quad(renderer_state, a_center, a_tr - a_bl, 0.0f, color);
-    draw_quad(renderer_state, b_center, b_tr - b_bl, 0.0f, color);
-
-    if(hit)
-    {
-        draw_line(renderer_state, a_tr, a_tr + (dir * depth), v4(1.0f, 1.0f, 0.0f, 1.0f));
-        draw_quad(renderer_state, b_center + dir * depth, b_tr - b_bl, 0.0f, v4(0.0f, 1.0f, 0.0f, 0.5f));
-    }
-#endif
 }
+
 

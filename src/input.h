@@ -3,18 +3,26 @@
 
 #include "my_math.h"
 
-struct InputState;
 
-InputState *init_input();
+struct Input
+{
+    static struct InputState *instance;
 
-bool key_toggled_down(InputState *input_state, int button);
-bool key_state(InputState *input_state, int button);
+    static void init();
 
-bool mouse_toggled_down(InputState *input_state, int button);
-bool mouse_state(InputState *input_state, int button);
-v2 mouse_world_position(InputState *input_state);
+    static bool key_down(int button);
+    static bool key_up(int button);
+    static bool key(int button);
 
-void read_input(InputState *input_state);
-void record_key_event(InputState *input_state, int vk_code, bool state);
-void record_mouse_event(InputState *input_state, int vk_code, bool state);
+    static bool mouse_button_down(int button);
+    static bool mouse_button_up(int button);
+    static bool mouse_button(int button);
+
+    static v2 mouse_world_position();
+
+    static void read_input();
+    static void record_key_event(int vk_code, bool state);
+    static void record_mouse_event(int vk_code, bool state);
+};
+
 

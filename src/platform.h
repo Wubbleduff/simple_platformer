@@ -4,36 +4,64 @@
 #include "my_math.h"
 #include <windows.h>
 
-struct PlatformState;
+struct Platform
+{
+    static struct PlatformState *instance;
 
-PlatformState *init_platform();
+    static void init();
+    static void handle_os_events();
+    static bool want_to_close();
+    static double time_since_start();
 
-void platform_events(PlatformState *platform_state);
+    // Window application
+    struct Window
+    {
+        static HWND handle();
+        static HDC device_context();
+        static int screen_width();
+        static int screen_height();
+        static int monitor_frequency();
+        static float aspect_ratio();
+        static v2 mouse_screen_position();
+    };
 
-bool want_to_close(PlatformState *platform_state);
+    // Memory management
+    struct Memory
+    {
+        static void *allocate(int bytes);
+        static void free(void *data);
+        static void memset(void *buffer, int value, int bytes);
+        static void memcpy(void *dest, void *src, int bytes);
+    };
 
-HWND get_window_handle(PlatformState *platform_state);
-HDC get_device_context(PlatformState *platform_state);
-int get_screen_width(PlatformState *platform_state);
-int get_screen_height(PlatformState *platform_state);
-int get_monitor_frequency(PlatformState *platform_state);
-float get_aspect_ratio(PlatformState *platform_state);
-v2 mouse_screen_position(PlatformState *platform_state);
+    // File managment
+    struct File;
+    struct FileSystem
+    {
+        enum FileMode
+        {
+            READ,
+            WRITE,
+            READ_WRITE
+        };
 
-double time_since_start(PlatformState *platform_state);
-
-
-
-char *read_file_as_string(const char *path);
-
+        static File *open(const char *path, FileMode mode);
+        static void close(File *file);
+        static void read(File *file, void *buffer, int bytes);
+        static void write(File *file, void *buffer, int bytes);
+        static int size(File *file);
+        static char *read_file_into_string(const char *path);
+    };
 
 
 #define log_info(format, ...) log_info_fn(__FILE__, __LINE__, format, __VA_ARGS__);
-void log_info_fn(const char *file, int line, const char *format, ...);
+    static void log_info_fn(const char *file, int line, const char *format, ...);
 
 #define log_warning(format, ...) log_warning_fn(__FILE__, __LINE__, format, __VA_ARGS__);
-void log_warning_fn(const char *file, int line, const char *format, ...);
+    static void log_warning_fn(const char *file, int line, const char *format, ...);
 
 #define log_error(format, ...) log_error_fn(__FILE__, __LINE__, format, __VA_ARGS__);
-void log_error_fn(const char *file, int line, const char *format, ...);
+    static void log_error_fn(const char *file, int line, const char *format, ...);
+
+};
 

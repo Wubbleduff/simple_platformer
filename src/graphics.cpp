@@ -1,5 +1,5 @@
 
-#include "renderer.h"
+#include "graphics.h"
 #include "engine.h"
 #include "platform.h"
 #include "memory.h"
@@ -61,7 +61,7 @@ struct Texture
     GLuint handle;
 };
 
-struct RendererState
+struct GraphicsState
 {
     HGLRC gl_context;
 
@@ -78,6 +78,8 @@ struct RendererState
 
     Texture *white_texture;
 };
+GraphicsState *Graphics::instance = nullptr;
+
 static const int TARGET_GL_VERSION[2] = { 4, 4 }; // {major, minor}
 static const int MAX_TRIANGLES = 256;
 static const int CIRCLE_MESH_RESOLUTION = 256;
@@ -90,15 +92,14 @@ static void check_gl_errors(const char *desc)
     GLint error = glGetError();
     if(error)
     {
-        log_error("Error %i: %s\n", error, desc);
+        Platform::log_error("Error %i: %s\n", error, desc);
         assert(false);
     }
 }
 
-static void create_gl_context(RendererState *renderer_state)
+static void create_gl_context(GraphicsState *instance)
 {
-    PlatformState *platform_state = get_engine_platform_state();
-    HDC dc = get_device_context(platform_state);
+    HDC dc = Platform::Window::device_context();
 
     PIXELFORMATDESCRIPTOR pfd;
     memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
@@ -140,14 +141,14 @@ static void create_gl_context(RendererState *renderer_state)
 
     if(wglewIsSupported("WGL_ARB_create_context") == 1)
     {
-        renderer_state->gl_context = wglCreateContextAttribsARB(dc, 0, attribs);
+        instance->gl_context = wglCreateContextAttribsARB(dc, 0, attribs);
         wglMakeCurrent(NULL, NULL);
         wglDeleteContext(temp_context);
-        wglMakeCurrent(dc, renderer_state->gl_context);
+        wglMakeCurrent(dc, instance->gl_context);
     }
     else
     {   //It's not possible to make a GL 3.x context. Use the old style context (GL 2.1 and before)
-        renderer_state->gl_context = temp_context;
+        instance->gl_context = temp_context;
     }
 
     //Checking GL version
@@ -158,12 +159,12 @@ static void create_gl_context(RendererState *renderer_state)
     glGetIntegerv(GL_MAJOR_VERSION, &OpenGLVersion[0]);
     glGetIntegerv(GL_MINOR_VERSION, &OpenGLVersion[1]);
 
-    if(!renderer_state->gl_context) return; // Bad
+    if(!instance->gl_context) return; // Bad
 }
 
 static Mesh *make_mesh(int num_vertices, Vertex *vertices, int num_indices, int *indices, GLuint primitive_type = GL_TRIANGLES)
 {
-    Mesh *mesh = (Mesh *)my_allocate(sizeof(Mesh));
+    Mesh *mesh = (Mesh *)Platform::Memory::allocate(sizeof(Mesh));
 
     mesh->num_indices = num_indices;
     mesh->primitive_type = primitive_type;
@@ -196,7 +197,7 @@ static Mesh *make_mesh(int num_vertices, Vertex *vertices, int num_indices, int 
 
 static Mesh *make_uv_mesh(int num_vertices, VertexUv *vertices, int num_indices, int *indices, GLuint primitive_type = GL_TRIANGLES)
 {
-    Mesh *mesh = (Mesh *)my_allocate(sizeof(Mesh));
+    Mesh *mesh = (Mesh *)Platform::Memory::allocate(sizeof(Mesh));
 
     mesh->num_indices = num_indices;
     mesh->primitive_type = primitive_type;
@@ -258,7 +259,7 @@ static void use_mesh(Mesh *mesh)
 
 static Texture *make_texture_from_bitmap(int width, int height, char *bitmap)
 {
-    Texture *texture = (Texture *)my_allocate(sizeof(Texture));
+    Texture *texture = (Texture *)Platform::Memory::allocate(sizeof(Texture));
 
     glGenTextures(1, &texture->handle);
     glBindTexture(GL_TEXTURE_2D, texture->handle);
@@ -303,58 +304,58 @@ static mat4 ndc_m_world(Camera *camera, float screen_aspect_ratio)
 
 
 
-void draw_quad(RendererState *renderer_state, v2 position, v2 scale, float rotation, v4 color)
+void Graphics::draw_quad(v2 position, v2 scale, float rotation, v4 color)
 {
-    Mesh *mesh = renderer_state->quad_mesh;
+    Mesh *mesh = instance->quad_mesh;
     use_mesh(mesh);
 
-    use_shader(renderer_state->quad_shader);
+    use_shader(instance->quad_shader);
 
-    use_texture(renderer_state->white_texture);
+    use_texture(instance->white_texture);
 
     mat4 world_m_model = make_translation_matrix(v3(position, 0.0f)) * make_z_axis_rotation_matrix(rotation) * make_scale_matrix(v3(scale, 1.0f));
-    mat4 mvp = ndc_m_world(renderer_state->camera, renderer_state->screen_aspect_ratio) * world_m_model;
-    set_uniform(renderer_state->quad_shader, "mvp", mvp);
-    set_uniform(renderer_state->quad_shader, "blend_color", color);
+    mat4 mvp = ndc_m_world(instance->camera, instance->screen_aspect_ratio) * world_m_model;
+    set_uniform(instance->quad_shader, "mvp", mvp);
+    set_uniform(instance->quad_shader, "blend_color", color);
     
     glDrawElements(mesh->primitive_type, mesh->num_indices, GL_UNSIGNED_INT, 0);
 
     check_gl_errors("draw");
 }
 
-void draw_circle(RendererState *renderer_state, v2 position, float radius, v4 color)
+void Graphics::draw_circle(v2 position, float radius, v4 color)
 {
-    Mesh *mesh = renderer_state->circle_mesh;
+    Mesh *mesh = instance->circle_mesh;
     use_mesh(mesh);
 
-    use_shader(renderer_state->quad_shader);
+    use_shader(instance->quad_shader);
 
-    use_texture(renderer_state->white_texture);
+    use_texture(instance->white_texture);
 
     mat4 world_m_model = make_translation_matrix(v3(position, 0.0f)) * make_scale_matrix(v3(radius, radius, 1.0f));
-    mat4 mvp = ndc_m_world(renderer_state->camera, renderer_state->screen_aspect_ratio) * world_m_model;
-    set_uniform(renderer_state->quad_shader, "mvp", mvp);
-    set_uniform(renderer_state->quad_shader, "blend_color", color);
+    mat4 mvp = ndc_m_world(instance->camera, instance->screen_aspect_ratio) * world_m_model;
+    set_uniform(instance->quad_shader, "mvp", mvp);
+    set_uniform(instance->quad_shader, "blend_color", color);
     
     glDrawElements(mesh->primitive_type, mesh->num_indices, GL_UNSIGNED_INT, 0);
 
     check_gl_errors("draw");
 }
 
-void draw_line(RendererState *renderer_state, v2 a, v2 b, v4 color)
+void Graphics::draw_line(v2 a, v2 b, v4 color)
 {
-    use_mesh(renderer_state->triangles_mesh);
+    use_mesh(instance->triangles_mesh);
 
     Vertex v[] = { Vertex(a), Vertex(b) };
     int i[] = { 0, 1 };
-    set_mesh_vertex_buffer_data(renderer_state->triangles_mesh, 2, v);
-    set_mesh_index_buffer_data(renderer_state->triangles_mesh, 2, i);
+    set_mesh_vertex_buffer_data(instance->triangles_mesh, 2, v);
+    set_mesh_index_buffer_data(instance->triangles_mesh, 2, i);
 
-    use_shader(renderer_state->flat_color_shader);
+    use_shader(instance->flat_color_shader);
 
-    mat4 mvp = ndc_m_world(renderer_state->camera, renderer_state->screen_aspect_ratio);
-    set_uniform(renderer_state->quad_shader, "mvp", mvp);
-    set_uniform(renderer_state->quad_shader, "blend_color", color);
+    mat4 mvp = ndc_m_world(instance->camera, instance->screen_aspect_ratio);
+    set_uniform(instance->quad_shader, "mvp", mvp);
+    set_uniform(instance->quad_shader, "blend_color", color);
 
     // Why is this LINE_STRIP with the triangles mesh?
     glDrawElements(GL_LINE_STRIP, 2, GL_UNSIGNED_INT, 0);
@@ -362,22 +363,22 @@ void draw_line(RendererState *renderer_state, v2 a, v2 b, v4 color)
     check_gl_errors("draw");
 }
 
-void draw_triangles(RendererState *renderer_state, int num_vertices, v2 *vertices, int num_triples, v2 **triples, v4 color)
+void Graphics::draw_triangles(int num_vertices, v2 *vertices, int num_triples, v2 **triples, v4 color)
 {
     // TODO: Fix this to only be 1 allocation on initialize
-    Vertex *my_vertices = (Vertex *)my_allocate(sizeof(Vertex) * num_vertices);
+    Vertex *my_vertices = (Vertex *)Platform::Memory::allocate(sizeof(Vertex) * num_vertices);
     int num_indices = num_triples * 3;
-    int *indices = (int *)my_allocate(sizeof(int) * num_indices);
+    int *indices = (int *)Platform::Memory::allocate(sizeof(int) * num_indices);
 
     //assert(num_vertices == num_triples + 2);
 
-    use_mesh(renderer_state->triangles_mesh);
+    use_mesh(instance->triangles_mesh);
 
     for(int i = 0; i < num_vertices; i++)
     {
         my_vertices[i] = Vertex(vertices[i]);
     }
-    set_mesh_vertex_buffer_data(renderer_state->triangles_mesh, num_vertices, my_vertices);
+    set_mesh_vertex_buffer_data(instance->triangles_mesh, num_vertices, my_vertices);
 
 
     v2 *start = vertices;
@@ -390,26 +391,26 @@ void draw_triangles(RendererState *renderer_state, int num_vertices, v2 *vertice
         indices[i + 1] = b - start;
         indices[i + 2] = c - start;
     }
-    set_mesh_index_buffer_data(renderer_state->triangles_mesh, num_indices, indices);
+    set_mesh_index_buffer_data(instance->triangles_mesh, num_indices, indices);
 
-    use_shader(renderer_state->flat_color_shader);
+    use_shader(instance->flat_color_shader);
 
-    mat4 mvp = ndc_m_world(renderer_state->camera, renderer_state->screen_aspect_ratio);
-    set_uniform(renderer_state->quad_shader, "mvp", mvp);
-    set_uniform(renderer_state->quad_shader, "blend_color", color);
+    mat4 mvp = ndc_m_world(instance->camera, instance->screen_aspect_ratio);
+    set_uniform(instance->quad_shader, "mvp", mvp);
+    set_uniform(instance->quad_shader, "blend_color", color);
 
-    glDrawElements(renderer_state->triangles_mesh->primitive_type, num_indices, GL_UNSIGNED_INT, 0);
+    glDrawElements(instance->triangles_mesh->primitive_type, num_indices, GL_UNSIGNED_INT, 0);
 
     check_gl_errors("draw");
 
     // SEE ABOVE
-    my_free(my_vertices);
-    my_free(indices);
+    Platform::Memory::free(my_vertices);
+    Platform::Memory::free(indices);
 }
 
-v2 ndc_point_to_world(RendererState *renderer_state, v2 ndc)
+v2 Graphics::ndc_point_to_world(v2 ndc)
 {
-    mat4 m_ndc_m_world = ndc_m_world(renderer_state->camera, renderer_state->screen_aspect_ratio);
+    mat4 m_ndc_m_world = ndc_m_world(instance->camera, instance->screen_aspect_ratio);
 
     v4 ndc4 = v4(ndc, 0.0f, 1.0f);
     v4 world4 = inverse(m_ndc_m_world) * ndc4;
@@ -417,32 +418,31 @@ v2 ndc_point_to_world(RendererState *renderer_state, v2 ndc)
     return v2(world4.x, world4.y);
 }
 
-void set_camera_position(RendererState *renderer_state, v2 position)
+void Graphics::set_camera_position(v2 position)
 {
-    renderer_state->camera->position = position;
+    instance->camera->position = position;
 }
 
-void set_camera_width(RendererState *renderer_state, float width)
+void Graphics::set_camera_width(float width)
 {
-    renderer_state->camera->width = width;
+    instance->camera->width = width;
 }
 
 
 
-RendererState *init_renderer()
+void Graphics::init()
 {
-    RendererState *renderer_state = (RendererState *)my_allocate(sizeof(RendererState));
+    instance = (GraphicsState *)Platform::Memory::allocate(sizeof(GraphicsState));
 
-    create_gl_context(renderer_state);
+    create_gl_context(instance);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    renderer_state->camera = (Camera *)my_allocate(sizeof(Camera));
-    renderer_state->camera->position = v2();
-    renderer_state->camera->width = 10.0f;
-    PlatformState *platform_state = get_engine_platform_state();
-    renderer_state->screen_aspect_ratio = (float)get_screen_width(platform_state) / (float)get_screen_height(platform_state);
+    instance->camera = (Camera *)Platform::Memory::allocate(sizeof(Camera));
+    instance->camera->position = v2();
+    instance->camera->width = 10.0f;
+    instance->screen_aspect_ratio = Platform::Window::aspect_ratio();
     
     {
         // Make quad mesh
@@ -458,46 +458,42 @@ RendererState *init_renderer()
             0, 1, 2,
             0, 2, 3
         };
-        renderer_state->quad_mesh = make_uv_mesh(_countof(v), v, _countof(i), i);
+        instance->quad_mesh = make_uv_mesh(_countof(v), v, _countof(i), i);
 
-        renderer_state->line_mesh = make_mesh(2, nullptr, 2, nullptr);
-        renderer_state->triangles_mesh = make_mesh(MAX_TRIANGLES, nullptr, MAX_TRIANGLES * 3, nullptr);
+        instance->line_mesh = make_mesh(2, nullptr, 2, nullptr);
+        instance->triangles_mesh = make_mesh(MAX_TRIANGLES, nullptr, MAX_TRIANGLES * 3, nullptr);
 
-        Vertex *circle_vs = (Vertex *)my_allocate(sizeof(Vertex) * CIRCLE_MESH_RESOLUTION);
-        int *circle_is = (int *)my_allocate(sizeof(int) * CIRCLE_MESH_RESOLUTION);
+        Vertex *circle_vs = (Vertex *)Platform::Memory::allocate(sizeof(Vertex) * CIRCLE_MESH_RESOLUTION);
+        int *circle_is = (int *)Platform::Memory::allocate(sizeof(int) * CIRCLE_MESH_RESOLUTION);
         for(int i = 0; i < CIRCLE_MESH_RESOLUTION; i++)
         {
             float theta = remap(i, 0.0f, CIRCLE_MESH_RESOLUTION - 1.0f, 0.0f, 2.0f * PI);
             circle_vs[i] = { v2(cos(theta), sin(theta)) };
         }
         for(int i = 0; i < CIRCLE_MESH_RESOLUTION; i++) circle_is[i] = i;
-        renderer_state->circle_mesh = make_mesh(CIRCLE_MESH_RESOLUTION, circle_vs, CIRCLE_MESH_RESOLUTION, circle_is, GL_LINE_STRIP);
+        instance->circle_mesh = make_mesh(CIRCLE_MESH_RESOLUTION, circle_vs, CIRCLE_MESH_RESOLUTION, circle_is, GL_LINE_STRIP);
         free(circle_vs);
         free(circle_is);
 
         // Make shader
-        renderer_state->quad_shader = make_shader("shaders/quad.shader");
-        renderer_state->flat_color_shader = make_shader("shaders/flat_color.shader");
+        instance->quad_shader = make_shader("shaders/quad.shader");
+        instance->flat_color_shader = make_shader("shaders/flat_color.shader");
 
         // Make texture
         char bitmap[] = { (char)255, (char)255, (char)255, (char)255 };
-        renderer_state->white_texture = make_texture_from_bitmap(1, 1, bitmap);
-
+        instance->white_texture = make_texture_from_bitmap(1, 1, bitmap);
     }
-
-    return renderer_state;
 }
 
-void clear_frame(RendererState *renderer_state, v4 color)
+void Graphics::clear_frame(v4 color)
 {
     glClearColor(color.r, color.g, color.b, color.a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
-void swap_frames(RendererState *renderer_state)
+void Graphics::swap_frames()
 {
-    PlatformState *platform_state = get_engine_platform_state();
-    HDC dc = get_device_context(platform_state);
+    HDC dc = Platform::Window::device_context();
     SwapBuffers(dc);
 }
 

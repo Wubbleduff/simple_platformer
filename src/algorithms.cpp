@@ -1,6 +1,6 @@
 
-#include "my_algorithms.h"
-#include "memory.h"
+#include "algorithms.h"
+#include "platform.h"
 
 #include <stdlib.h>
 
@@ -46,7 +46,7 @@ void find_convex_hull(int num_vertices, v2 *vertices, int *num_hull_lines, v2 *(
     }
 
     // Sort points by the angle between it and the lowest point and the x axis
-    VertexAndAngle *sorted_vertices = (VertexAndAngle *)my_allocate(sizeof(VertexAndAngle) * num_vertices);
+    VertexAndAngle *sorted_vertices = (VertexAndAngle *)Platform::Memory::allocate(sizeof(VertexAndAngle) * num_vertices);
     for(int i = 0; i < num_vertices; i++)
     {
         float angle;

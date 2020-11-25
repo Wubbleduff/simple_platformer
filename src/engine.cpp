@@ -2,16 +2,17 @@
 #include "engine.h"
 #include "platform.h"
 #include "input.h"
-#include "renderer.h"
-#include "memory.h"
+#include "graphics.h"
 #include "my_math.h"
+#include "serialization.h"
+
+#include "level.h"
 
 // DEBUG
 #include "imgui.h"
 #include "examples/imgui_impl_win32.h"
 #include "examples/imgui_impl_opengl3.h"
 
-#include "level.h"
 
 
 
@@ -21,10 +22,6 @@ struct GameState
 
     double seconds_since_last_step;
     double last_loop_time;
-
-    PlatformState *platform_state;
-    InputState *input_state;
-    RendererState *renderer_state;
     
     int num_levels;
     Level **levels;
@@ -43,18 +40,15 @@ static const double MAX_STEPS_PER_LOOP = 10;
 
 static void init_game_state()
 {
-    game_state = (GameState *)my_allocate(sizeof(GameState));
+    game_state = (GameState *)Platform::Memory::allocate(sizeof(GameState));
 
     game_state->running = true;
     game_state->seconds_since_last_step = 0.0;
     game_state->last_loop_time = 0.0;
 
-    game_state->platform_state = init_platform();
-    game_state->input_state = init_input();
-    game_state->renderer_state = init_renderer();
 
     game_state->num_levels = 1;
-    game_state->levels = (Level **)my_allocate(sizeof(Level *) * game_state->num_levels);
+    game_state->levels = (Level **)Platform::Memory::allocate(sizeof(Level *) * game_state->num_levels);
     for(int i = 0; i < game_state->num_levels; i++)
     {
         game_state->levels[i] = create_level();
@@ -80,7 +74,7 @@ static void init_imgui()
     
     // Setup Platform/Renderer bindings
     ImGui_ImplOpenGL3_Init("#version 440 core");
-    ImGui_ImplWin32_Init(get_window_handle(get_engine_platform_state()));
+    ImGui_ImplWin32_Init(Platform::Window::handle());
 }
 
 static void imgui_begin_frame()
@@ -98,41 +92,58 @@ static void imgui_end_frame()
 
 static void do_one_step(float time_step)
 {
-    clear_frame(game_state->renderer_state, v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
+    Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
     imgui_begin_frame();
     
     ImGui::Begin("Debug");
 
-    read_input(game_state->input_state);
+    Input::read_input();
 
 
     // Update the in game level
     level_step(game_state->playing_level, time_step);
+
+    if(ImGui::Button("Save to file"))
+    {
+        Serialization::Stream *stream = Serialization::make_stream();
+        serialize_level(game_state->playing_level, stream);
+
+        const char *path = "data/levels/test";
+        Platform::File *file = Platform::FileSystem::open(path, Platform::FileSystem::WRITE);
+        Platform::FileSystem::write(file, Serialization::stream_data(stream), Serialization::stream_size(stream));
+        Platform::FileSystem::close(file);
+
+        Serialization::free_stream(stream);
+    }
 
 
 
     ImGui::End();
 
     imgui_end_frame();
-    swap_frames(game_state->renderer_state);
+    Graphics::swap_frames();
 }
 
 
 
 void start_engine()
 {
+    Platform::init();
+    Input::init();
+    Graphics::init();
+
     init_game_state();
     init_imgui();
 
 
     seed_random(0);
 
-    game_state->last_loop_time = time_since_start(game_state->platform_state);
+    game_state->last_loop_time = Platform::time_since_start();
     while(game_state->running)
     {
-        platform_events(game_state->platform_state);
+        Platform::handle_os_events();
 
-        double this_loop_time = time_since_start(game_state->platform_state);
+        double this_loop_time = Platform::time_since_start();
         double seconds_since_last_loop = this_loop_time - game_state->last_loop_time;
         game_state->last_loop_time = this_loop_time;
         game_state->seconds_since_last_step += seconds_since_last_loop;
@@ -178,22 +189,5 @@ void start_engine()
 void stop_engine()
 {
     game_state->running = false;
-}
-
-
-
-PlatformState *get_engine_platform_state()
-{
-    return game_state->platform_state;
-}
-
-InputState *get_engine_input_state()
-{
-    return game_state->input_state;
-}
-
-RendererState *get_engine_renderer_state()
-{
-    return game_state->renderer_state;
 }
 
