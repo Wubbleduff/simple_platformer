@@ -385,7 +385,6 @@ void serialize_level(Level *level, Serialization::Stream *stream)
     
 
     // Write the body
-    int i = 0;
     v2i tl = level->grid.top_left();
     v2i br = level->grid.bottom_right();
     for(v2i pos = tl; pos.y >= br.y; pos.y--)
@@ -400,12 +399,29 @@ void serialize_level(Level *level, Serialization::Stream *stream)
             {
                 Serialization::stream_write(stream, '0');
             }
-
-            i++;
         }
     }
+}
 
+void deserialize_level(Level *level, Serialization::Stream *stream)
+{
+    // Read the header
+    Serialization::stream_read(stream, &(level->grid.width));
+    Serialization::stream_read(stream, &(level->grid.height));
+    
 
+    // Read the body
+    v2i tl = level->grid.top_left();
+    v2i br = level->grid.bottom_right();
+    for(v2i pos = tl; pos.y >= br.y; pos.y--)
+    {
+        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
+        {
+            char c;
+            Serialization::stream_read(stream, &c);
+            level->grid.at(pos)->filled = (c == '1');
+        }
+    }
 }
 
 

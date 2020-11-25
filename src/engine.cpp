@@ -108,10 +108,23 @@ static void do_one_step(float time_step)
         Serialization::Stream *stream = Serialization::make_stream();
         serialize_level(game_state->playing_level, stream);
 
-        const char *path = "data/levels/test";
+        const char *path = "assets/data/levels/test";
         Platform::File *file = Platform::FileSystem::open(path, Platform::FileSystem::WRITE);
         Platform::FileSystem::write(file, Serialization::stream_data(stream), Serialization::stream_size(stream));
         Platform::FileSystem::close(file);
+
+        Serialization::free_stream(stream);
+    }
+
+    if(ImGui::Button("Read from file"))
+    {
+        const char *path = "assets/data/levels/test";
+        Platform::File *file = Platform::FileSystem::open(path, Platform::FileSystem::READ);
+        Serialization::Stream *stream = Serialization::make_stream(Platform::FileSystem::size(file));
+        Platform::FileSystem::read(file, Serialization::stream_data(stream), Platform::FileSystem::size(file));
+        Platform::FileSystem::close(file);
+
+        deserialize_level(game_state->playing_level, stream);
 
         Serialization::free_stream(stream);
     }

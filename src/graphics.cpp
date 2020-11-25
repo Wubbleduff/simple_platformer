@@ -476,8 +476,8 @@ void Graphics::init()
         free(circle_is);
 
         // Make shader
-        instance->quad_shader = make_shader("shaders/quad.shader");
-        instance->flat_color_shader = make_shader("shaders/flat_color.shader");
+        instance->quad_shader = make_shader("assets/shaders/quad.shader");
+        instance->flat_color_shader = make_shader("assets/shaders/flat_color.shader");
 
         // Make texture
         char bitmap[] = { (char)255, (char)255, (char)255, (char)255 };

@@ -40,8 +40,7 @@ debug: | intermediate $(DEBUG_RUN_TREE)
 	cp -f $(INTERMEDIATE)$(EXE) $(DEBUG_RUN_TREE)
 	cp -f $(INTERMEDIATE)$(PDB) $(DEBUG_RUN_TREE)
 	cp -f $(DLL_GLEW) $(DEBUG_RUN_TREE)
-	cp -rf textures/ $(DEBUG_RUN_TREE)
-	cp -rf shaders/ $(DEBUG_RUN_TREE)
+	cp -rf assets/ $(DEBUG_RUN_TREE)
 
 optimized_debug: | intermediate $(OPTIMIZED_DEBUG_RUN_TREE)
 	cl $(OPTIMIZED_DEBUG_COMPILE_FLAGS) $(INCLUDE_DIRS) $(SOURCE)
@@ -49,16 +48,14 @@ optimized_debug: | intermediate $(OPTIMIZED_DEBUG_RUN_TREE)
 	cp -f $(INTERMEDIATE)$(EXE) $(OPTIMIZED_DEBUG_RUN_TREE)
 	cp -f $(INTERMEDIATE)$(PDB) $(OPTIMIZED_DEBUG_RUN_TREE)
 	cp -f $(DLL_GLEW) $(OPTIMIZED_DEBUG_RUN_TREE)
-	cp -rf textures/ $(OPTIMIZED_DEBUG_RUN_TREE)
-	cp -rf shaders/ $(OPTIMIZED_DEBUG_RUN_TREE)
+	cp -rf assets/ $(OPTIMIZED_DEBUG_RUN_TREE)
 
 release: | intermediate $(RELEASE_RUN_TREE)
 	cl $(RELEASE_COMPILE_FLAGS) $(INCLUDE_DIRS) $(SOURCE)
 	link $(RELEASE_LINK_FLAGS) $(LIBS) $(INTERMEDIATE)*.obj
 	cp -f $(INTERMEDIATE)$(EXE) $(RELEASE_RUN_TREE)
 	cp -f $(DLL_GLEW) $(RELEASE_RUN_TREE)
-	cp -rf textures/ $(RELEASE_RUN_TREE)
-	cp -rf shaders/ $(RELEASE_RUN_TREE)
+	cp -rf assets/ $(RELEASE_RUN_TREE)
 
 imgui: | intermediate
 	cl $(OPTIMIZED_DEBUG_COMPILE_FLAGS) /I"lib/imgui" /I"lib/glew-2.1.0/include" /D"IMGUI_IMPL_OPENGL_LOADER_GLEW" lib/imgui/imgui.cpp lib/imgui/imgui_demo.cpp lib/imgui/imgui_draw.cpp lib/imgui/imgui_widgets.cpp lib/imgui/examples/imgui_impl_opengl3.cpp lib/imgui/examples/imgui_impl_win32.cpp

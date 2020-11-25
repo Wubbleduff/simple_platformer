@@ -11,3 +11,5 @@ void level_step(Level *level, float dt);
 
 void serialize_level(Level *level, Serialization::Stream *stream);
 
+void deserialize_level(Level *level, Serialization::Stream *stream);
+

@@ -282,28 +282,26 @@ struct Platform::File
 Platform::File *Platform::FileSystem::open(const char *path, FileMode mode)
 {
     Platform::File *file = (Platform::File *)Platform::Memory::allocate(sizeof(File));
-    char mode_string[8];
+    char mode_string[8] = {};
     switch(mode)
     {
         case READ:
-            mode_string[0] = 'r';
-            mode_string[1] = 'b';
-            mode_string[2] = '\0';
+            strcpy(mode_string, "rb");
             break;
         case WRITE:
-            mode_string[0] = 'w';
-            mode_string[1] = 'b';
-            mode_string[2] = '\0';
+            strcpy(mode_string, "wb");
             break;
         case READ_WRITE:
-            mode_string[0] = 'r';
-            mode_string[1] = 'w';
-            mode_string[2] = 'b';
-            mode_string[3] = '\0';
+            strcpy(mode_string, "rwb");
             break;
     }
 
     file->file = fopen(path, mode_string);
+
+    if(file->file == NULL)
+    {
+        Platform::log_error("Couldn't open file %s", path);
+    }
 
     return file;
 }
