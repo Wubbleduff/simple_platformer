@@ -267,7 +267,7 @@ void Platform::Memory::memset(void *buffer, int value, int bytes)
     ::memset(buffer, value, bytes);
 }
 
-void Platform::Memory::memcpy(void *dest, void *src, int bytes)
+void Platform::Memory::memcpy(void *dest, const void *src, int bytes)
 {
     ::memcpy(dest, src, bytes);
 }
@@ -279,8 +279,62 @@ struct Platform::File
 {
     FILE *file;
 };
+static BOOL directory_exists(LPCTSTR szPath)
+{
+  DWORD dwAttrib = GetFileAttributes(szPath);
+
+  BOOL exists = (dwAttrib != INVALID_FILE_ATTRIBUTES && 
+                (dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+  return exists == TRUE;
+}
+
+static void ensure_directory_exists(const char *path)
+{
+    int path_length = strlen(path);
+
+    char *path_copy = (char *)Platform::Memory::allocate(path_length + 1);
+    strcpy(path_copy, path);
+
+    int stack_count = 0;
+    char **dirs_stack = (char **)Platform::Memory::allocate(path_length * sizeof(char *));
+
+    char *start = path_copy;
+    char *end = start + path_length;
+
+    if(*end == '/') return;
+
+    while(true)
+    {
+        while(*end != '/' && end != start)
+        {
+            end--;
+        }
+
+        if( (end == start) || directory_exists(sub_path) ) break;
+
+        dirs_stack[stack_count++] = end;
+        end--;
+    }
+
+    while(stack_count > 0)
+    {
+        char *dir_path_end = dirs_stack[stack_count - 1];
+        stack_count--;
+
+        *dir_path_end = '\0';
+        CreateDirectory(start, NULL);
+        *dir_path_end = '/';
+    }
+
+    Platform::Memory::free(dirs_stack);
+    Platform::Memory::free(path_copy);
+}
+
 Platform::File *Platform::FileSystem::open(const char *path, FileMode mode)
 {
+
+    ensure_directory_exists(path);
+
     Platform::File *file = (Platform::File *)Platform::Memory::allocate(sizeof(File));
     char mode_string[8] = {};
     switch(mode)
