@@ -310,7 +310,11 @@ static void ensure_directory_exists(const char *path)
             end--;
         }
 
-        if( (end == start) || directory_exists(sub_path) ) break;
+        *end = '\0';
+        bool exists = directory_exists(start);
+        *end = '/';
+        if( (end == start) || exists ) break;
+        
 
         dirs_stack[stack_count++] = end;
         end--;

@@ -31,7 +31,7 @@ struct Platform
         static void *allocate(int bytes);
         static void free(void *data);
         static void memset(void *buffer, int value, int bytes);
-        static void memcpy(void *dest, void *src, int bytes);
+        static void memcpy(void *dest, const void *src, int bytes);
     };
 
     // File managment
