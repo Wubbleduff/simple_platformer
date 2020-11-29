@@ -1,6 +1,6 @@
 
-#include "level.h"
-#include "memory.h"
+#include "levels.h"
+#include "platform.h"
 #include "my_math.h"
 #include "algorithms.h"
 #include "graphics.h"
@@ -118,7 +118,7 @@ struct Player
 };
 
 
-struct Level
+struct Levels::Level
 {
     Grid grid;
 
@@ -160,7 +160,7 @@ static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
     return true;
 }
 
-static void reset_level(Level *level)
+static void reset_level(Levels::Level *level)
 {
     level->grid.world_scale = 1.0f;
 
@@ -187,7 +187,7 @@ static void reset_level(Level *level)
 
 
 
-static void check_and_resolve_collisions(Level *level)
+static void check_and_resolve_collisions(Levels::Level *level)
 {
     Player *player = &(level->player);
     v2 player_bl = player->position - v2(1.0f, 1.0f) * player->full_extent * 0.5f;
@@ -270,45 +270,11 @@ static void check_and_resolve_collisions(Level *level)
     }
 }
 
-static void render_level(Level *level)
+
+
+Levels::Level *Levels::create_level()
 {
-    Player *player = &(level->player);
-
-    v2 camera_offset = v2(16.0f, 4.0f);
-    Graphics::set_camera_width(64.0f);
-    Graphics::set_camera_position(player->position + camera_offset);
-
-    // Draw the player
-    Graphics::draw_quad(v2(), v2(0.25f, 0.25f), PI / 4.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
-
-    // Draw grid terrain
-    v2i tl = level->grid.top_left();
-    v2i br = level->grid.bottom_right();
-    for(v2i pos = tl; pos.y >= br.y; pos.y--)
-    {
-        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
-        {
-            if(level->grid.at(pos)->filled)
-            {
-                float inten = (float)pos.col / level->grid.width;
-                v4 color = v4(1.0f - inten, 0.0f, inten, 1.0f);
-                if(pos.col == level->grid.width / 2) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
-
-                v2 world_pos = level->grid.cell_to_world(pos) + v2(1.0f, 1.0f) * level->grid.world_scale / 2.0f;
-                float scale = level->grid.world_scale * 0.95f;
-                Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
-            }
-        }
-    }
-
-    Graphics::draw_quad(player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
-}
-
-
-
-Level *create_level()
-{
-    Level *level = (Level *)malloc(sizeof(Level));
+    Level* level = (Level *)Platform::Memory::allocate(sizeof(Level));
 
     level->grid.init(256, 256);
 
@@ -317,9 +283,8 @@ Level *create_level()
     return level;
 }
 
-void level_step(Level *level, float dt)
+void Levels::step_level(Level *level, float dt)
 {
-
     if(Input::key_down('R'))
     {
         reset_level(level);
@@ -373,11 +338,43 @@ void level_step(Level *level, float dt)
 
 
     check_and_resolve_collisions(level);
-
-    render_level(level);
 }
 
-void serialize_level(Level *level, Serialization::Stream *stream)
+void Levels::draw_level(Level *level)
+{
+    Player *player = &(level->player);
+
+    v2 camera_offset = v2(16.0f, 4.0f);
+    Graphics::set_camera_width(64.0f);
+    Graphics::set_camera_position(player->position + camera_offset);
+
+    // Draw the player
+    Graphics::draw_quad(v2(), v2(0.25f, 0.25f), PI / 4.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
+
+    // Draw grid terrain
+    v2i tl = level->grid.top_left();
+    v2i br = level->grid.bottom_right();
+    for(v2i pos = tl; pos.y >= br.y; pos.y--)
+    {
+        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
+        {
+            if(level->grid.at(pos)->filled)
+            {
+                float inten = (float)pos.col / level->grid.width;
+                v4 color = v4(1.0f - inten, 0.0f, inten, 1.0f);
+                if(pos.col == level->grid.width / 2) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
+
+                v2 world_pos = level->grid.cell_to_world(pos) + v2(1.0f, 1.0f) * level->grid.world_scale / 2.0f;
+                float scale = level->grid.world_scale * 0.95f;
+                Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
+            }
+        }
+    }
+
+    Graphics::draw_quad(player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
+}
+
+void Levels::serialize_level(Level *level, Serialization::Stream *stream)
 {
     // Write the header
     Serialization::stream_write(stream, level->grid.width);
@@ -403,7 +400,7 @@ void serialize_level(Level *level, Serialization::Stream *stream)
     }
 }
 
-void deserialize_level(Level *level, Serialization::Stream *stream)
+void Levels::deserialize_level(Level *level, Serialization::Stream *stream)
 {
     // Read the header
     Serialization::stream_read(stream, &(level->grid.width));

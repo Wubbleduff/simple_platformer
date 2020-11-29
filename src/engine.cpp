@@ -6,7 +6,7 @@
 #include "my_math.h"
 #include "serialization.h"
 
-#include "level.h"
+#include "levels.h"
 
 // DEBUG
 #include "imgui.h"
@@ -20,12 +20,14 @@ struct GameState
 {
     bool running;
 
+    NetworkMode network_mode;
+
     double seconds_since_last_step;
     double last_loop_time;
     
     int num_levels;
-    Level **levels;
-    Level *playing_level;
+    Levels::Level **levels;
+    Levels::Level *playing_level;
     int current_score;
 
     // Maybe a list of unlocks (gun, grappling hook)
@@ -48,10 +50,10 @@ static void init_game_state()
 
 
     game_state->num_levels = 1;
-    game_state->levels = (Level **)Platform::Memory::allocate(sizeof(Level *) * game_state->num_levels);
+    game_state->levels = (Levels::Level **)Platform::Memory::allocate(sizeof(Levels::Level *) * game_state->num_levels);
     for(int i = 0; i < game_state->num_levels; i++)
     {
-        game_state->levels[i] = create_level();
+        game_state->levels[i] = Levels::create_level();
     }
     game_state->playing_level = game_state->levels[0];
 
@@ -90,54 +92,63 @@ static void imgui_end_frame()
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
-static void do_one_step(float time_step)
+static void step_as_server(float time_step)
 {
-    Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
-    imgui_begin_frame();
-    
-    ImGui::Begin("Debug");
-
     Input::read_input();
-
+    Network::read_client_input();
 
     // Update the in game level
-    level_step(game_state->playing_level, time_step);
+    Levels::step_level(game_state->playing_level, time_step);
 
-    if(ImGui::Button("Save to file"))
-    {
-        Serialization::Stream *stream = Serialization::make_stream();
-        serialize_level(game_state->playing_level, stream);
+    Network::broadcast_game(game_state);
 
-        const char *path = "assets/data/levels/test";
-        Platform::File *file = Platform::FileSystem::open(path, Platform::FileSystem::WRITE);
-        Platform::FileSystem::write(file, Serialization::stream_data(stream), Serialization::stream_size(stream));
-        Platform::FileSystem::close(file);
+    Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
+    imgui_begin_frame();
+    ImGui::Begin("Debug");
 
-        Serialization::free_stream(stream);
-    }
-
-    if(ImGui::Button("Read from file"))
-    {
-        const char *path = "assets/data/levels/test";
-        Platform::File *file = Platform::FileSystem::open(path, Platform::FileSystem::READ);
-        Serialization::Stream *stream = Serialization::make_stream(Platform::FileSystem::size(file));
-        Platform::FileSystem::read(file, Serialization::stream_data(stream), Platform::FileSystem::size(file));
-        Platform::FileSystem::close(file);
-
-        deserialize_level(game_state->playing_level, stream);
-
-        Serialization::free_stream(stream);
-    }
-
-
+    Levels::draw_level();
 
     ImGui::End();
+    imgui_end_frame();
+    Graphics::swap_frames();
 
+}
+
+static void step_as_client(float time_step)
+{
+    Input::read_input();
+
+    Network::send_input_to_server();
+
+    Network::read_game_state();
+
+    Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
+    imgui_begin_frame();
+    ImGui::Begin("Debug");
+
+    Levels::draw_level(game_state->playing_level);
+
+    ImGui::End();
     imgui_end_frame();
     Graphics::swap_frames();
 }
 
-
+static void do_one_step(float time_step)
+{
+    switch(game_state->network_mode)
+    {
+        case NetworkMode::SERVER:
+        {
+            step_as_server(time_step);
+            break;
+        }
+        case NetworkMode::CLIENT:
+        {
+            step_as_client(time_step);
+            break;
+        }
+    }
+}
 
 void start_engine()
 {
@@ -173,10 +184,10 @@ void start_engine()
                 {
                     // Move the engine forward in time by the target seconds
                     do_one_step(TARGET_STEP_TIME);
-                }
 
-                // Reset the timer
-                game_state->seconds_since_last_step -= TARGET_STEP_TIME;
+                    // Reset the timer
+                    game_state->seconds_since_last_step -= TARGET_STEP_TIME;
+                }
             }
             else
             {
