@@ -95,26 +95,54 @@ void Input::serialize_input_state(Serialization::Stream *stream)
     // Keyboard
     for(int i = 0; i < MAX_KEYS; i++)
     {
-        Serialization::stream_write(stream, instance->current_key_states[i] ? 1 : 0);
+        Serialization::write_stream(stream, instance->current_key_states[i] ? 1 : 0);
     }
     for(int i = 0; i < MAX_KEYS; i++)
     {
-        Serialization::stream_write(stream, instance->previous_key_states[i] ? 1 : 0);
+        Serialization::write_stream(stream, instance->previous_key_states[i] ? 1 : 0);
     }
 
     // Mouse
     for(int i = 0; i < MAX_MOUSE_KEYS; i++)
     {
-        Serialization::stream_write(stream, instance->current_mouse_states[i] ? 1 : 0);
+        Serialization::write_stream(stream, instance->current_mouse_states[i] ? 1 : 0);
     }
     for(int i = 0; i < MAX_MOUSE_KEYS; i++)
     {
-        Serialization::stream_write(stream, instance->previous_mouse_states[i] ? 1 : 0);
+        Serialization::write_stream(stream, instance->previous_mouse_states[i] ? 1 : 0);
     }
 }
 
 void Input::deserialize_input_state(Serialization::Stream *stream)
 {
+    // Keyboard
+    for(int i = 0; i < MAX_KEYS; i++)
+    {
+        int state;
+        Serialization::read_stream(stream, &state);
+        instance->current_key_states[i] = (state == 1);
+        
+    }
+    for(int i = 0; i < MAX_KEYS; i++)
+    {
+        int state;
+        Serialization::read_stream(stream, &state);
+        instance->previous_key_states[i] = (state == 1);
+    }
+
+    // Mouse
+    for(int i = 0; i < MAX_MOUSE_KEYS; i++)
+    {
+        int state;
+        Serialization::read_stream(stream, &state);
+        instance->current_mouse_states[i] = (state == 1);
+    }
+    for(int i = 0; i < MAX_MOUSE_KEYS; i++)
+    {
+        int state;
+        Serialization::read_stream(stream, &state);
+        instance->current_mouse_states[i] = (state == 1);
+    }
 }
 
 

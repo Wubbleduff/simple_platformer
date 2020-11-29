@@ -377,8 +377,8 @@ void Levels::draw_level(Level *level)
 void Levels::serialize_level(Level *level, Serialization::Stream *stream)
 {
     // Write the header
-    Serialization::stream_write(stream, level->grid.width);
-    Serialization::stream_write(stream, level->grid.height);
+    Serialization::write_stream(stream, level->grid.width);
+    Serialization::write_stream(stream, level->grid.height);
     
 
     // Write the body
@@ -390,11 +390,11 @@ void Levels::serialize_level(Level *level, Serialization::Stream *stream)
         {
             if(level->grid.at(pos)->filled)
             {
-                Serialization::stream_write(stream, '1');
+                Serialization::write_stream(stream, '1');
             }
             else
             {
-                Serialization::stream_write(stream, '0');
+                Serialization::write_stream(stream, '0');
             }
         }
     }
@@ -403,8 +403,8 @@ void Levels::serialize_level(Level *level, Serialization::Stream *stream)
 void Levels::deserialize_level(Level *level, Serialization::Stream *stream)
 {
     // Read the header
-    Serialization::stream_read(stream, &(level->grid.width));
-    Serialization::stream_read(stream, &(level->grid.height));
+    Serialization::read_stream(stream, &(level->grid.width));
+    Serialization::read_stream(stream, &(level->grid.height));
     
 
     // Read the body
@@ -415,7 +415,7 @@ void Levels::deserialize_level(Level *level, Serialization::Stream *stream)
         for(pos.x = tl.x; pos.x <= br.x; pos.x++)
         {
             char c;
-            Serialization::stream_read(stream, &c);
+            Serialization::read_stream(stream, &c);
             level->grid.at(pos)->filled = (c == '1');
         }
     }

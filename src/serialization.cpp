@@ -8,6 +8,7 @@ struct Serialization::Stream
     int capacity;
     int size;
     char *data;
+    int current_offset;
 };
 
 static void maybe_grow_stream(Serialization::Stream *stream, int bytes)
@@ -39,6 +40,7 @@ Serialization::Stream *Serialization::make_stream(int capacity)
     stream->capacity = capacity;
     stream->size = 0;
     stream->data = (char *)Platform::Memory::allocate(capacity);
+    stream->current_offset = 0;
     return stream;
 }
 
@@ -57,43 +59,51 @@ int Serialization::stream_size(Stream *stream)
     return stream->size;
 }
 
-void Serialization::reset_stream(Stream *stream)
+void Serialization::clear_stream(Stream *stream)
 {
     stream->size = 0;
+    stream->current_offset = 0;
 }
 
-void Serialization::stream_write(Stream *stream, char a)
+void Serialization::reset_stream(Stream *stream)
+{
+    stream->current_offset = 0;
+}
+
+void Serialization::write_stream(Stream *stream, char a)
 {
     int bytes = sizeof(a);
 
     maybe_grow_stream(stream, bytes);
 
-    stream->data[stream->size] = a;
+    *(char *)(stream->data + stream->current_offset) = a;
     stream->size += sizeof(a);
+    stream->current_offset += sizeof(a);
 }
 
-void Serialization::stream_write(Stream *stream, int a)
+void Serialization::write_stream(Stream *stream, int a)
 {
     int bytes = sizeof(a);
 
     maybe_grow_stream(stream, bytes);
 
-    *(int *)(stream->data + stream->size) = a;
+    *(int *)(stream->data + stream->current_offset) = a;
     stream->size += sizeof(a);
+    stream->current_offset += sizeof(a);
 }
 
-void Serialization::stream_read(Stream *stream, char *a)
+void Serialization::read_stream(Stream *stream, char *a)
 {
-    char *end = stream->data + stream->size;
-    *a = *end;
-    stream->size += sizeof(*a);
+    char *end = stream->data + stream->current_offset;
+    *a = *(char *)end;
+    stream->current_offset += sizeof(*a);
 }
 
-void Serialization::stream_read(Stream *stream, int *a)
+void Serialization::read_stream(Stream *stream, int *a)
 {
-    char *end = stream->data + stream->size;
+    char *end = stream->data + stream->current_offset;
     *a = *(int *)end;
-    stream->size += sizeof(*a);
+    stream->current_offset += sizeof(*a);
 }
 
 

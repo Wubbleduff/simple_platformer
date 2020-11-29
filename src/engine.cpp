@@ -171,9 +171,12 @@ void start_engine()
     Platform::init();
     Input::init();
     Graphics::init();
+    Network::init();
 
     init_game_state();
     init_imgui();
+
+    game_state->network_mode = Network::GameMode::SERVER;
 
     seed_random(0);
 

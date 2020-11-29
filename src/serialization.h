@@ -11,12 +11,13 @@ struct Serialization
     static char *stream_data(Stream *stream);
     static int stream_size(Stream *stream);
 
+    static void clear_stream(Stream *stream);
     static void reset_stream(Stream *stream);
 
-    static void stream_write(Stream *stream, char a);
-    static void stream_write(Stream *stream, int a);
+    static void write_stream(Stream *stream, char a);
+    static void write_stream(Stream *stream, int a);
 
-    static void stream_read(Stream *stream, char *a);
-    static void stream_read(Stream *stream, int *a);
+    static void read_stream(Stream *stream, char *a);
+    static void read_stream(Stream *stream, int *a);
 };
 
