@@ -5,6 +5,7 @@
 #include "graphics.h"
 #include "my_math.h"
 #include "serialization.h"
+#include "network.h"
 
 #include "levels.h"
 
@@ -20,7 +21,7 @@ struct GameState
 {
     bool running;
 
-    NetworkMode network_mode;
+    Network::GameMode network_mode;
 
     double seconds_since_last_step;
     double last_loop_time;
@@ -92,21 +93,33 @@ static void imgui_end_frame()
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
+static void serialize_game_state(Serialization::Stream *stream)
+{
+}
+
+static void deserialize_game_state(Serialization::Stream *stream)
+{
+}
+
 static void step_as_server(float time_step)
 {
     Input::read_input();
-    Network::read_client_input();
+    Network::read_client_input_states();
 
     // Update the in game level
     Levels::step_level(game_state->playing_level, time_step);
 
-    Network::broadcast_game(game_state);
+
+    Serialization::Stream *game_state_stream = Serialization::make_stream();
+    serialize_game_state(game_state_stream);
+    Network::broadcast_game_state(game_state_stream);
+    Serialization::free_stream(game_state_stream);
 
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
     imgui_begin_frame();
     ImGui::Begin("Debug");
 
-    Levels::draw_level();
+    Levels::draw_level(game_state->playing_level);
 
     ImGui::End();
     imgui_end_frame();
@@ -118,9 +131,12 @@ static void step_as_client(float time_step)
 {
     Input::read_input();
 
-    Network::send_input_to_server();
+    Network::send_input_state_to_server();
 
-    Network::read_game_state();
+    Serialization::Stream *game_state_stream = Serialization::make_stream();
+    Network::read_game_state(game_state_stream);
+    deserialize_game_state(game_state_stream);
+    Serialization::free_stream(game_state_stream);
 
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
     imgui_begin_frame();
@@ -137,12 +153,12 @@ static void do_one_step(float time_step)
 {
     switch(game_state->network_mode)
     {
-        case NetworkMode::SERVER:
+        case Network::GameMode::SERVER:
         {
             step_as_server(time_step);
             break;
         }
-        case NetworkMode::CLIENT:
+        case Network::GameMode::CLIENT:
         {
             step_as_client(time_step);
             break;
@@ -158,7 +174,6 @@ void start_engine()
 
     init_game_state();
     init_imgui();
-
 
     seed_random(0);
 
@@ -185,9 +200,10 @@ void start_engine()
                     // Move the engine forward in time by the target seconds
                     do_one_step(TARGET_STEP_TIME);
 
-                    // Reset the timer
-                    game_state->seconds_since_last_step -= TARGET_STEP_TIME;
                 }
+
+                // Reset the timer
+                game_state->seconds_since_last_step -= TARGET_STEP_TIME * num_steps_to_do;
             }
             else
             {

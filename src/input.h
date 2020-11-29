@@ -2,7 +2,7 @@
 #pragma once
 
 #include "my_math.h"
-
+#include "serialization.h"
 
 struct Input
 {
@@ -23,6 +23,9 @@ struct Input
     static void read_input();
     static void record_key_event(int vk_code, bool state);
     static void record_mouse_event(int vk_code, bool state);
+
+    static void serialize_input_state(Serialization::Stream *stream);
+    static void deserialize_input_state(Serialization::Stream *stream);
 };
 
 

@@ -57,6 +57,11 @@ int Serialization::stream_size(Stream *stream)
     return stream->size;
 }
 
+void Serialization::reset_stream(Stream *stream)
+{
+    stream->size = 0;
+}
+
 void Serialization::stream_write(Stream *stream, char a)
 {
     int bytes = sizeof(a);

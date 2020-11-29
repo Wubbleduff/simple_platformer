@@ -90,6 +90,33 @@ v2 Input::mouse_world_position()
     return Graphics::ndc_point_to_world(ndc);
 }
 
+void Input::serialize_input_state(Serialization::Stream *stream)
+{
+    // Keyboard
+    for(int i = 0; i < MAX_KEYS; i++)
+    {
+        Serialization::stream_write(stream, instance->current_key_states[i] ? 1 : 0);
+    }
+    for(int i = 0; i < MAX_KEYS; i++)
+    {
+        Serialization::stream_write(stream, instance->previous_key_states[i] ? 1 : 0);
+    }
+
+    // Mouse
+    for(int i = 0; i < MAX_MOUSE_KEYS; i++)
+    {
+        Serialization::stream_write(stream, instance->current_mouse_states[i] ? 1 : 0);
+    }
+    for(int i = 0; i < MAX_MOUSE_KEYS; i++)
+    {
+        Serialization::stream_write(stream, instance->previous_mouse_states[i] ? 1 : 0);
+    }
+}
+
+void Input::deserialize_input_state(Serialization::Stream *stream)
+{
+}
+
 
 
 void Input::init()

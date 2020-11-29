@@ -11,6 +11,8 @@ struct Serialization
     static char *stream_data(Stream *stream);
     static int stream_size(Stream *stream);
 
+    static void reset_stream(Stream *stream);
+
     static void stream_write(Stream *stream, char a);
     static void stream_write(Stream *stream, int a);
 
