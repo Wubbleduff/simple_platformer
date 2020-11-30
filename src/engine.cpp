@@ -11,8 +11,6 @@
 
 // DEBUG
 #include "imgui.h"
-#include "examples/imgui_impl_win32.h"
-#include "examples/imgui_impl_opengl3.h"
 
 
 
@@ -49,6 +47,8 @@ static void init_game_state()
     game_state->seconds_since_last_step = 0.0;
     game_state->last_loop_time = 0.0;
 
+    game_state->network_mode = Network::GameMode::OFFLINE;
+
 
     game_state->num_levels = 1;
     game_state->levels = (Levels::Level **)Platform::Memory::allocate(sizeof(Levels::Level *) * game_state->num_levels);
@@ -76,21 +76,19 @@ static void init_imgui()
     //ImGui::StyleColorsClassic();
     
     // Setup Platform/Renderer bindings
-    ImGui_ImplOpenGL3_Init("#version 440 core");
-    ImGui_ImplWin32_Init(Platform::Window::handle());
+    Graphics::ImGuiImplementation::init();
 }
 
 static void imgui_begin_frame()
 {
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplWin32_NewFrame();
+    Graphics::ImGuiImplementation::new_frame();
     ImGui::NewFrame();
 }
 
 static void imgui_end_frame()
 {
     ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    Graphics::ImGuiImplementation::end_frame();
 }
 
 static void serialize_game_state(Serialization::Stream *stream)
@@ -101,19 +99,32 @@ static void deserialize_game_state(Serialization::Stream *stream)
 {
 }
 
-static void step_as_server(float time_step)
+static void switch_network_mode(Network::GameMode mode)
+{
+    if(mode == Network::GameMode::OFFLINE)
+    {
+        game_state->network_mode = Network::GameMode::OFFLINE;
+    }
+
+    if(mode == Network::GameMode::CLIENT)
+    {
+        game_state->network_mode = Network::GameMode::CLIENT;
+        Network::Client::init();
+    }
+
+    if(mode == Network::GameMode::SERVER)
+    {
+        game_state->network_mode = Network::GameMode::SERVER;
+        Network::Server::listen_for_client_connections(4242);
+    }
+}
+
+static void step_as_offline(float time_step)
 {
     Input::read_input();
-    Network::read_client_input_states();
 
     // Update the in game level
     Levels::step_level(game_state->playing_level, time_step);
-
-
-    Serialization::Stream *game_state_stream = Serialization::make_stream();
-    serialize_game_state(game_state_stream);
-    Network::broadcast_game_state(game_state_stream);
-    Serialization::free_stream(game_state_stream);
 
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
     imgui_begin_frame();
@@ -121,20 +132,24 @@ static void step_as_server(float time_step)
 
     Levels::draw_level(game_state->playing_level);
 
+    ImGui::Text("OFFLINE");
+
+    if(ImGui::Button("Switch to client")) switch_network_mode(Network::GameMode::CLIENT);
+    if(ImGui::Button("Switch to server")) switch_network_mode(Network::GameMode::SERVER);
+
     ImGui::End();
     imgui_end_frame();
     Graphics::swap_frames();
-
 }
 
 static void step_as_client(float time_step)
 {
     Input::read_input();
 
-    Network::send_input_state_to_server();
+    Network::Client::send_input_state_to_server();
 
     Serialization::Stream *game_state_stream = Serialization::make_stream();
-    Network::read_game_state(game_state_stream);
+    Network::Client::read_game_state(game_state_stream);
     deserialize_game_state(game_state_stream);
     Serialization::free_stream(game_state_stream);
 
@@ -142,6 +157,16 @@ static void step_as_client(float time_step)
     imgui_begin_frame();
     ImGui::Begin("Debug");
 
+    ImGui::Text("CLIENT");
+
+    if(ImGui::Button("Switch to offline")) switch_network_mode(Network::GameMode::OFFLINE);
+    if(ImGui::Button("Switch to server"))  switch_network_mode(Network::GameMode::SERVER);
+
+    if(ImGui::Button("Connect to server"))
+    {
+        Network::Client::connect_to_server("127.0.0.1", 4242);
+    }
+
     Levels::draw_level(game_state->playing_level);
 
     ImGui::End();
@@ -149,10 +174,49 @@ static void step_as_client(float time_step)
     Graphics::swap_frames();
 }
 
+
+static void step_as_server(float time_step)
+{
+    Input::read_input();
+    //Network::Server::read_client_input_states();
+
+    // Update the in game level
+    Levels::step_level(game_state->playing_level, time_step);
+
+
+    Network::Server::accept_client_connections();
+
+    Serialization::Stream *game_state_stream = Serialization::make_stream();
+    serialize_game_state(game_state_stream);
+    Network::Server::broadcast_game_state(game_state_stream);
+    Serialization::free_stream(game_state_stream);
+
+    Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
+    imgui_begin_frame();
+    ImGui::Begin("Debug");
+
+    ImGui::Text("SERVER");
+
+    if(ImGui::Button("Switch to offline")) switch_network_mode(Network::GameMode::OFFLINE);
+    if(ImGui::Button("Switch to client"))  switch_network_mode(Network::GameMode::CLIENT);
+
+    Levels::draw_level(game_state->playing_level);
+
+    ImGui::End();
+    imgui_end_frame();
+    Graphics::swap_frames();
+
+}
+
 static void do_one_step(float time_step)
 {
     switch(game_state->network_mode)
     {
+        case Network::GameMode::OFFLINE:
+        {
+            step_as_offline(time_step);
+            break;
+        }
         case Network::GameMode::SERVER:
         {
             step_as_server(time_step);
@@ -176,7 +240,7 @@ void start_engine()
     init_game_state();
     init_imgui();
 
-    game_state->network_mode = Network::GameMode::SERVER;
+    Platform::log_info("Hello, sir! %d, %s", 42, "Bye!");
 
     seed_random(0);
 

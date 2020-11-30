@@ -1,8 +1,6 @@
 
 #pragma once
 
-#include "GL/glew.h"
-#include "GL/wglew.h"
 #include "my_math.h"
 
 struct Shader;

@@ -23,5 +23,11 @@ struct Graphics
     static void set_camera_position(v2 position);
     static void set_camera_width(float width);
 
+    struct ImGuiImplementation
+    {
+        static void init();
+        static void new_frame();
+        static void end_frame();
+    };
 };
 

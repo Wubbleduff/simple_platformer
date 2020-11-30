@@ -11,11 +11,28 @@ EXE=engine.exe
 
 PDB=engine.pdb
 
-SOURCE=src\main.cpp src\platform.cpp src\engine.cpp src\algorithms.cpp src\input.cpp src\graphics.cpp src\shader.cpp src\levels.cpp src\serialization.cpp src/network.cpp lib\imgui\imgui.cpp lib\imgui\imgui_demo.cpp lib\imgui\imgui_draw.cpp lib\imgui\imgui_widgets.cpp lib\imgui\examples\imgui_impl_opengl3.cpp lib\imgui\examples\imgui_impl_win32.cpp
+SOURCE=\
+src\platform_windows\main.cpp \
+src\platform_windows\platform.cpp \
+src\platform_windows\network.cpp \
+src\platform_windows\graphics.cpp \
+src\platform_windows\shader.cpp \
+src\engine.cpp \
+src\data_structures.cpp \
+src\algorithms.cpp \
+src\input.cpp \
+src\levels.cpp \
+src\serialization.cpp \
+lib\imgui\imgui.cpp \
+lib\imgui\imgui_demo.cpp \
+lib\imgui\imgui_draw.cpp \
+lib\imgui\imgui_widgets.cpp \
+lib\imgui\examples\imgui_impl_opengl3.cpp \
+lib\imgui\examples\imgui_impl_win32.cpp
 
 INCLUDE_DIRS=/I"src" /I"lib\glew-2.1.0\include" /I"lib\imgui" /I"lib\stb"
 
-LIBS=user32.lib gdi32.lib shell32.lib opengl32.lib lib\glew-2.1.0\lib\Release\x64\glew32.lib
+LIBS=user32.lib gdi32.lib shell32.lib opengl32.lib Ws2_32.lib lib\glew-2.1.0\lib\Release\x64\glew32.lib
 
 # DLLs
 DLL_GLEW=lib\glew-2.1.0\bin\Release\x64\glew32.dll

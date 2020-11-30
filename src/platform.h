@@ -2,7 +2,6 @@
 #pragma once
 
 #include "my_math.h"
-#include <windows.h>
 
 struct Platform
 {
@@ -16,8 +15,6 @@ struct Platform
     // Window application
     struct Window
     {
-        static HWND handle();
-        static HDC device_context();
         static int screen_width();
         static int screen_height();
         static int monitor_frequency();

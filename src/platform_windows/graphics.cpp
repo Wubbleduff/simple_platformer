@@ -2,10 +2,12 @@
 #include "graphics.h"
 #include "engine.h"
 #include "platform.h"
-#include "memory.h"
 #include "my_math.h"
 #include "shader.h"
 
+#include "platform_windows/platform_windows.h"
+#include "examples/imgui_impl_win32.h"
+#include "examples/imgui_impl_opengl3.h"
 #include "GL/glew.h"
 #include "GL/wglew.h"
 #include <windows.h>
@@ -99,7 +101,7 @@ static void check_gl_errors(const char *desc)
 
 static void create_gl_context(GraphicsState *instance)
 {
-    HDC dc = Platform::Window::device_context();
+    HDC dc = Windows::device_context();
 
     PIXELFORMATDESCRIPTOR pfd;
     memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
@@ -493,7 +495,31 @@ void Graphics::clear_frame(v4 color)
 
 void Graphics::swap_frames()
 {
-    HDC dc = Platform::Window::device_context();
+    HDC dc = Windows::device_context();
     SwapBuffers(dc);
 }
+
+
+
+
+
+
+// ImGui Implementation
+void Graphics::ImGuiImplementation::init()
+{
+    ImGui_ImplOpenGL3_Init("#version 440 core");
+    ImGui_ImplWin32_Init(Windows::handle());
+}
+
+void Graphics::ImGuiImplementation::new_frame()
+{
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+}
+
+void Graphics::ImGuiImplementation::end_frame()
+{
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
 

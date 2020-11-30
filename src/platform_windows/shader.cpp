@@ -1,8 +1,10 @@
 
 #include "shader.h"
 #include "platform.h"
-#include "memory.h"
 
+#include "GL/glew.h"
+#include "GL/wglew.h"
+#include "my_math.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>

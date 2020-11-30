@@ -29,7 +29,7 @@ static void maybe_grow_stream(Serialization::Stream *stream, int bytes)
 
     Platform::Memory::memcpy(stream->data, old, stream->size);
 
-    free(old);
+    Platform::Memory::free(old);
 }
 
 
