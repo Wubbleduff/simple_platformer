@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include "my_math.h"
+#include "game_math.h"
 #include "serialization.h"
 
 struct Input
@@ -18,7 +18,7 @@ struct Input
     static bool mouse_button_up(int button);
     static bool mouse_button(int button);
 
-    static v2 mouse_world_position();
+    static GameMath::v2 mouse_world_position();
 
     static void read_input();
     static void record_key_event(int vk_code, bool state);

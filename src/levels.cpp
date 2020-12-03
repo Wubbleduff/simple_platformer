@@ -1,16 +1,21 @@
 
 #include "levels.h"
 #include "platform.h"
-#include "my_math.h"
+#include "game_math.h"
 #include "algorithms.h"
+#include "data_structures.h"
 #include "graphics.h"
 #include "engine.h"
 #include "input.h"
 #include "serialization.h"
 
-#include "imgui.h"
+//#include "imgui.h"
 
-#include <vector>
+
+
+using namespace GameMath;
+
+
 
 struct v2i
 {
@@ -46,7 +51,7 @@ struct Grid
     {
         width = w;
         height = h;
-        cells = (Cell *)calloc(sizeof(Cell), w * h);
+        cells = (Cell *)Platform::Memory::allocate(sizeof(Cell) * w * h);
     }
 
     void clear()
@@ -62,8 +67,8 @@ struct Grid
         int bottom_bound = -( (width - 1) / 2 ) - 1;
         int top_bound = (width - 1) / 2;
 
-        assert(pos.x >= left_bound && pos.x <= right_bound);
-        assert(pos.y >= bottom_bound && pos.y <= top_bound);
+        //assert(pos.x >= left_bound && pos.x <= right_bound);
+        //assert(pos.y >= bottom_bound && pos.y <= top_bound);
 
         int array_row = ( (height - 1) - (pos.y + abs(bottom_bound)) );
         int array_col = pos.x + abs(left_bound);
@@ -143,7 +148,7 @@ static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
     float top_diff    = b_bottom - a_top;
     float bottom_diff = a_bottom - b_top;
 
-    float max_depth = max_float(left_diff, max_float(right_diff, max_float(top_diff, bottom_diff)));
+    float max_depth = max(left_diff, max(right_diff, max(top_diff, bottom_diff)));
 
     if(max_depth > 0.0f)
     {
@@ -193,10 +198,10 @@ static void check_and_resolve_collisions(Levels::Level *level)
     v2 player_bl = player->position - v2(1.0f, 1.0f) * player->full_extent * 0.5f;
     v2 player_tr = player->position + v2(1.0f, 1.0f) * player->full_extent * 0.5f;
 
-    std::vector<float> rights;
-    std::vector<float> lefts;
-    std::vector<float> ups;
-    std::vector<float> downs;
+    DynamicArray<float> rights;
+    DynamicArray<float> lefts;
+    DynamicArray<float> ups;
+    DynamicArray<float> downs;
 
     v2i tl = level->grid.top_left();
     v2i br = level->grid.bottom_right();
@@ -241,10 +246,10 @@ static void check_and_resolve_collisions(Levels::Level *level)
     float max_left = 0.0f;
     float max_up = 0.0f;
     float max_down = 0.0f;
-    for(float f : rights) { max_right = max_float(f, max_right); }
-    for(float f : lefts)  { max_left  = max_float(f, max_left); }
-    for(float f : ups)    { max_up    = max_float(f, max_up); }
-    for(float f : downs)  { max_down  = max_float(f, max_down); }
+    for(int i = 0; i < rights.size; i++) { max_right = max(rights[i], max_right); }
+    for(int i = 0; i < lefts.size; i++)  { max_left  = max(lefts[i], max_left); }
+    for(int i = 0; i < ups.size; i++)    { max_up    = max(ups[i], max_up); }
+    for(int i = 0; i < downs.size; i++)  { max_down  = max(downs[i], max_down); }
     resolution += v2( 1.0f,  0.0f) * max_right;
     resolution += v2(-1.0f,  0.0f) * max_left;
     resolution += v2( 0.0f,  1.0f) * max_up;
@@ -264,7 +269,7 @@ static void check_and_resolve_collisions(Levels::Level *level)
     {
         player->vertical_velocity = 0.0f;
     }
-    if(absf(resolution.x) > 0.0f)
+    if(abs(resolution.x) > 0.0f)
     {
         player->horizontal_velocity = 0.0f;
     }

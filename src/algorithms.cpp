@@ -6,6 +6,10 @@
 
 
 
+using namespace GameMath;
+
+
+
 static const float EPSILON = 0.0001f;
 
 
@@ -35,7 +39,7 @@ void find_convex_hull(int num_vertices, v2 *vertices, int *num_hull_lines, v2 *(
     for(int i = 0; i < num_vertices; i++)
     {
         v2 *point = &(vertices[i]);
-        if(absf(point->y - lowest_point->y) < EPSILON)
+        if(abs(point->y - lowest_point->y) < EPSILON)
         {
             lowest_point = (point->x < lowest_point->x) ? point : lowest_point;
         }
@@ -50,7 +54,7 @@ void find_convex_hull(int num_vertices, v2 *vertices, int *num_hull_lines, v2 *(
     for(int i = 0; i < num_vertices; i++)
     {
         float angle;
-        if(&(vertices[i]) == lowest_point) angle = -INFINITY;
+        if(&(vertices[i]) == lowest_point) angle = -7.0f;
         else angle = angle_between(vertices[i] - *lowest_point, v2(1.0f, 0.0f));
         sorted_vertices[i] = { &(vertices[i]), angle };
     }
@@ -68,7 +72,7 @@ void find_convex_hull(int num_vertices, v2 *vertices, int *num_hull_lines, v2 *(
             v2 *next_top_stack = hull[*num_hull_lines - 2];
             float cross_p = cross(*next_top_stack, *top_stack, *next_considered_point);
 
-            if(absf(cross_p) < EPSILON)
+            if(abs(cross_p) < EPSILON)
             {
                 // The 3 points are collinear, take the furthest one
                 if(length_squared(*next_top_stack - *next_considered_point) < length_squared(*next_top_stack - *top_stack))

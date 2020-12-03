@@ -1,9 +1,11 @@
 
 #include "engine.h"
 #include "platform.h"
+#include "logging.h"
 #include "input.h"
+#include "game_console.h"
 #include "graphics.h"
-#include "my_math.h"
+#include "game_math.h"
 #include "serialization.h"
 #include "network.h"
 
@@ -13,6 +15,8 @@
 #include "imgui.h"
 
 
+
+using namespace GameMath;
 
 
 struct GameState
@@ -126,6 +130,11 @@ static void step_as_offline(float time_step)
     // Update the in game level
     Levels::step_level(game_state->playing_level, time_step);
 
+    if(Input::key(' '))
+    {
+        Log::log_info("jump!");
+    }
+
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
     imgui_begin_frame();
     ImGui::Begin("Debug");
@@ -136,6 +145,8 @@ static void step_as_offline(float time_step)
 
     if(ImGui::Button("Switch to client")) switch_network_mode(Network::GameMode::CLIENT);
     if(ImGui::Button("Switch to server")) switch_network_mode(Network::GameMode::SERVER);
+
+    GameConsole::draw();
 
     ImGui::End();
     imgui_end_frame();
@@ -168,6 +179,8 @@ static void step_as_client(float time_step)
     }
 
     Levels::draw_level(game_state->playing_level);
+
+    GameConsole::draw();
 
     ImGui::End();
     imgui_end_frame();
@@ -202,6 +215,8 @@ static void step_as_server(float time_step)
 
     Levels::draw_level(game_state->playing_level);
 
+    GameConsole::draw();
+
     ImGui::End();
     imgui_end_frame();
     Graphics::swap_frames();
@@ -233,6 +248,8 @@ static void do_one_step(float time_step)
 void start_engine()
 {
     Platform::init();
+    Log::init();
+    GameConsole::init();
     Input::init();
     Graphics::init();
     Network::init();
@@ -240,7 +257,7 @@ void start_engine()
     init_game_state();
     init_imgui();
 
-    Platform::log_info("Hello, sir! %d, %s", 42, "Bye!");
+    Log::log_info("Hello, sir! %d, %s", 42, "Bye!");
 
     seed_random(0);
 
@@ -258,7 +275,7 @@ void start_engine()
         if(game_state->seconds_since_last_step >= TARGET_STEP_TIME)
         {
             // You may have to update the engine more than once if more than one step time has passed
-            int num_steps_to_do = floor(game_state->seconds_since_last_step / TARGET_STEP_TIME);
+            int num_steps_to_do = (int)(game_state->seconds_since_last_step / TARGET_STEP_TIME);
 
             if(num_steps_to_do <= MAX_STEPS_PER_LOOP)
             {

@@ -73,15 +73,17 @@ bool Input::mouse_button(int key)
     return instance->current_mouse_states[key];
 }
 
-v2 Input::mouse_world_position()
+GameMath::v2 Input::mouse_world_position()
 {
-    v2 p = Platform::Window::mouse_screen_position();
+    int sx, sy;
+    Platform::Window::mouse_screen_position(&sx, &sy);
+    GameMath::v2 p = GameMath::v2((float)sx, (float)sy);
     float screen_width = Platform::Window::screen_width();
     float screen_height = Platform::Window::screen_height();
 
     p.y = screen_height - p.y;
 
-    v2 ndc =
+    GameMath::v2 ndc =
     {
         (p.x / screen_width)  * 2.0f - 1.0f,
         (p.y / screen_height) * 2.0f - 1.0f,

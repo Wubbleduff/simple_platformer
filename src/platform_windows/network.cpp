@@ -1,7 +1,9 @@
 
 #include "network.h"
+#include "logging.h"
 #include "input.h"
 #include "platform.h"
+
 
 #include <WinSock2.h> // Networking API
 #include <Ws2tcpip.h> // InetPton
@@ -58,14 +60,14 @@ static void init_winsock()
     // Initialize Winsock
     WSADATA wsa_data;
     error = WSAStartup(MAKEWORD(2, 2), &wsa_data);
-    if(error) Platform::log_error("Error loading winsock: %i\n", get_last_error());
+    if(error) Log::log_error("Error loading winsock: %i\n", get_last_error());
 }
 
 static void cleanup_winsock()
 {
     // Shut down Winsock
     int error = WSACleanup();
-    if(error == -1) Platform::log_error("Error unloading networking module: %i\n", get_last_error());
+    if(error == -1) Log::log_error("Error unloading networking module: %i\n", get_last_error());
 }
 
 static void set_blocking_mode(SOCKET socket, BlockingMode mode)
@@ -116,7 +118,7 @@ void Network::Client::init()
     instance->client.server_connection.tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if(instance->client.server_connection.tcp_socket == -1)
     {
-        Platform::log_error("Error opening socket: %i\n", get_last_error());
+        Log::log_error("Error opening socket: %i\n", get_last_error());
         return;
     }
 }
@@ -134,7 +136,7 @@ void Network::Client::connect_to_server(const char *ip_address, int port)
     int error = inet_pton(AF_INET, ip_address, &address.sin_addr.s_addr);
     if(error == -1)
     {
-        Platform::log_error("Error creating an address: %i\n", error);
+        Log::log_error("Error creating an address: %i\n", error);
         return;
     }
 
@@ -151,7 +153,7 @@ void Network::Client::connect_to_server(const char *ip_address, int port)
         if(status == CODE_INVALID)
         {
             error = CODE_INVALID;
-            Platform::log_error("Could not connect to %s:%i", ip_address, port);
+            Log::log_error("Could not connect to %s:%i", ip_address, port);
             return;
         }
     }
@@ -188,7 +190,7 @@ void Network::Server::listen_for_client_connections(int port)
     SOCKET listening_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if(listening_socket == INVALID_SOCKET)
     {
-        Platform::log_error("Couldn't create listening socket: %d\n", get_last_error());
+        Log::log_error("Couldn't create listening socket: %d\n", get_last_error());
         return;
     }
 
@@ -196,7 +198,7 @@ void Network::Server::listen_for_client_connections(int port)
     int error = ioctlsocket(listening_socket, FIONBIO, &mode);
     if(error != 0)
     {
-        Platform::log_error("Couldn't make socket non-blocking: %i\n", get_last_error());
+        Log::log_error("Couldn't make socket non-blocking: %i\n", get_last_error());
         return;
     }
 
@@ -209,14 +211,14 @@ void Network::Server::listen_for_client_connections(int port)
     if(error == SOCKET_ERROR)
     {
         error = get_last_error();
-        Platform::log_error("Couldn't bind listening socket to port: %d, error: %d\n", port, error);
+        Log::log_error("Couldn't bind listening socket to port: %d, error: %d\n", port, error);
         return;
     }
 
     error = listen(listening_socket, SOMAXCONN);
     if(error == SOCKET_ERROR)
     {
-        Platform::log_error("Couldn't listen on the created socket: %d\n", get_last_error());
+        Log::log_error("Couldn't listen on the created socket: %d\n", get_last_error());
         return;
     }
 
@@ -242,7 +244,7 @@ void Network::Server::accept_client_connections()
 
             if(return_code != CODE_WOULD_BLOCK)
             {
-                Platform::log_error("Error accepting client: %d\n", get_last_error());
+                Log::log_error("Error accepting client: %d\n", get_last_error());
             }
             break;
         }
@@ -254,7 +256,7 @@ void Network::Server::accept_client_connections()
 
         time_t now;
         time(&now);
-        Platform::log_info("Client connected! %s", ctime(&now));
+        Log::log_info("Client connected! %s", ctime(&now));
 
     } while(return_code != CODE_WOULD_BLOCK);
 }

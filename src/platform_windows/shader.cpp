@@ -1,13 +1,18 @@
 
 #include "shader.h"
 #include "platform.h"
+#include "logging.h"
 
 #include "GL/glew.h"
 #include "GL/wglew.h"
-#include "my_math.h"
+#include "game_math.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+
+
+
+using namespace GameMath;
 
 
 
@@ -24,7 +29,7 @@ static void check_gl_errors(const char *desc)
     GLint error = glGetError();
     if(error)
     {
-        Platform::log_error("Error %i: %s\n", error, desc);
+        Log::log_error("Error %i: %s\n", error, desc);
         assert(false);
     }
 }
@@ -147,7 +152,7 @@ Shader *make_shader(const char *shader_path)
     if(!success)
     {
         glGetShaderInfoLog(vert_shader, 512, NULL, info_log);
-        Platform::log_error("VERTEX SHADER ERROR : %s\n%s\n", shader_path, info_log);
+        Log::log_error("VERTEX SHADER ERROR : %s\n%s\n", shader_path, info_log);
     }
 
     unsigned int frag_shader;
@@ -158,7 +163,7 @@ Shader *make_shader(const char *shader_path)
     if(!success)
     {
         glGetShaderInfoLog(frag_shader, 512, NULL, info_log);
-        Platform::log_error("VERTEX SHADER ERROR : %s\n%s\n", shader_path, info_log);
+        Log::log_error("VERTEX SHADER ERROR : %s\n%s\n", shader_path, info_log);
     }
 
 
@@ -172,7 +177,7 @@ Shader *make_shader(const char *shader_path)
         if(!success)
         {
             glGetShaderInfoLog(geom_shader, 512, NULL, info_log);
-            Platform::log_error("VERTEX SHADER ERROR : %s\n%s\n", shader_path, info_log);
+            Log::log_error("VERTEX SHADER ERROR : %s\n%s\n", shader_path, info_log);
         }
     }
 
@@ -191,7 +196,7 @@ Shader *make_shader(const char *shader_path)
     if(!success)
     {
         glGetProgramInfoLog(program, 512, NULL, info_log);
-        Platform::log_error("SHADER LINKING ERROR : %s\n%s\n", shader_path, info_log);
+        Log::log_error("SHADER LINKING ERROR : %s\n%s\n", shader_path, info_log);
     }
 
     glDeleteShader(vert_shader);
@@ -213,13 +218,13 @@ void set_uniform(Shader *shader, const char *name, v4 value)
 {
     GLint loc = glGetUniformLocation(shader->program, name);
     glUniform4f(loc, value.x, value.y, value.z, value.w);
-    if(loc == -1) Platform::log_error("Could not find uniform \"%s\"", name);
+    if(loc == -1) Log::log_error("Could not find uniform \"%s\"", name);
 }
 
 void set_uniform(Shader *shader, const char *name, mat4 value)
 {
     GLint loc = glGetUniformLocation(shader->program, name);
     glUniformMatrix4fv(loc, 1, true, &(value[0][0]));
-    if(loc == -1) Platform::log_error("Could not find uniform \"%s\"", name);
+    if(loc == -1) Log::log_error("Could not find uniform \"%s\"", name);
 }
 

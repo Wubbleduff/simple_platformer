@@ -1,14 +1,12 @@
 
-#include "platform.h"
+#include "logging.h"
 #include "engine.h"
 #include "input.h"
 #include "data_structures.h"
 
 #include "platform_windows/platform_windows.h"
-
-#include <stdlib.h> // malloc, free
-#include <stdio.h>
-#include <stdarg.h>
+#include <cstdlib>
+#include <cstdio>
 
 
 
@@ -21,29 +19,13 @@ struct PlatformState
         int height;
     } window;
 
-
-    struct Log
-    {
-        struct Entry
-        {
-            int size;
-            char *buffer;
-        };
-
-        static Entry *make_entry(int capacity);
-
-        FILE *log_file;
-        DynamicArray<Entry> entries;
-
-        static const int SCRATCH_BUFFER_SIZE = 2048;
-        char *scratch_buffer;
-    } log;
-
     bool want_to_close;
 
     LARGE_INTEGER start_time_counter;
 };
 PlatformState *Platform::instance = nullptr;
+
+
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
@@ -107,7 +89,7 @@ void Platform::init()
 
     if(!RegisterClass(&window_class))
     {
-        log_error("Could not register Windows class!");
+        Log::log_error("Could not register Windows class!");
         return;
     }
 
@@ -136,7 +118,7 @@ void Platform::init()
 
     if(!instance->window.handle)
     {
-        log_error("Could not open window!");
+        Log::log_error("Could not open window!");
         return;
     }
 
@@ -150,15 +132,11 @@ void Platform::init()
     DWORD create_dir_result = GetLastError();
     if(result || ERROR_ALREADY_EXISTS == create_dir_result)
     {
-        // CopyFile(...)
-        instance->log.log_file = fopen("output/log.txt", "w");
     }
     else
     {
         // Failed to create directory.
     }
-
-    instance->log.scratch_buffer = (char *)Platform::Memory::allocate(PlatformState::Log::SCRATCH_BUFFER_SIZE);
 }
 
 void Platform::handle_os_events()
@@ -252,25 +230,26 @@ float Platform::Window::aspect_ratio()
     return (float)instance->window.width / instance->window.height; 
 }
 
-v2 Platform::Window::mouse_screen_position()
+void Platform::Window::mouse_screen_position(int *x, int *y)
 {
     POINT window_client_pos;
     BOOL success = GetCursorPos(&window_client_pos);
     success = ScreenToClient(instance->window.handle, &window_client_pos);
-
-    return v2(window_client_pos.x, window_client_pos.y);
+    *x = window_client_pos.x;
+    *y = window_client_pos.y;
 }
 
 
 
 void *Platform::Memory::allocate(int bytes)
 {
-    return ::malloc(bytes);
+    //return ::malloc(bytes);
+    return new char[bytes];
 }
 
 void Platform::Memory::free(void *data)
 {
-    ::free(data);
+    delete [] data;
 }
 
 void Platform::Memory::memset(void *buffer, int value, int bytes)
@@ -369,7 +348,7 @@ Platform::File *Platform::FileSystem::open(const char *path, FileMode mode)
 
     if(file->file == NULL)
     {
-        Platform::log_error("Couldn't open file %s", path);
+        Log::log_error("Couldn't open file %s", path);
     }
 
     return file;
@@ -416,57 +395,6 @@ char *Platform::FileSystem::read_file_into_string(const char *path)
 
     return buffer;
 }
-
-PlatformState::Log::Entry *PlatformState::Log::make_entry(int capacity)
-{
-    PlatformState::Log::Entry *entry =
-        (PlatformState::Log::Entry *)Platform::Memory::allocate(sizeof(PlatformState::Log::Entry));
-
-    entry->size = capacity;
-    entry->buffer = (char *)Platform::Memory::allocate(capacity + 1);
-
-    return entry;
-}
-
-void generic_log(PlatformState *instance, const char *format, ...)
-{
-    va_list args;
-    va_start(args, format);
-
-    //int formatted_size = vsnprintf(nullptr, 0, format, args);
-    PlatformState::Log::Entry *entry = PlatformState::Log::make_entry(2048);
-    vsnprintf(entry->buffer, entry->size, format, args);
-
-    va_end(args);
-
-    fprintf(instance->log.log_file, entry->buffer);
-    fprintf(instance->log.log_file, "\n");
-}
-
-void Platform::log_info_fn(const char *file, int line, const char *format, ...)
-{
-    const char *format1 = "-- INFO : %s : %s\n";
-    const char *format2 = format;
-    strncpy(instance->log.scratch_buffer, format1, PlatformState::Log::SCRATCH_BUFFER_SIZE);
-    strncat(instance->log.scratch_buffer, format2, PlatformState::Log::SCRATCH_BUFFER_SIZE);
-
-    va_list args;
-    va_start(args, format);
-
-    generic_log(instance, instance->log.scratch_buffer, file, line, args);
-
-    va_end(args);
-}
-
-void Platform::log_warning_fn(const char *file, int line, const char *format, ...)
-{
-}
-
-void Platform::log_error_fn(const char *file, int line, const char *format, ...)
-{
-}
-
-
 
 
 

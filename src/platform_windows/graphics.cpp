@@ -1,8 +1,9 @@
 
 #include "graphics.h"
+#include "logging.h"
 #include "engine.h"
 #include "platform.h"
-#include "my_math.h"
+#include "game_math.h"
 #include "shader.h"
 
 #include "platform_windows/platform_windows.h"
@@ -12,6 +13,10 @@
 #include "GL/wglew.h"
 #include <windows.h>
 #include <assert.h>
+
+
+
+using namespace GameMath;
 
 
 
@@ -94,7 +99,7 @@ static void check_gl_errors(const char *desc)
     GLint error = glGetError();
     if(error)
     {
-        Platform::log_error("Error %i: %s\n", error, desc);
+        Log::log_error("Error %i: %s\n", error, desc);
         assert(false);
     }
 }
