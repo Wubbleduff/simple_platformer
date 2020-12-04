@@ -379,7 +379,7 @@ void Levels::draw_level(Level *level)
     Graphics::draw_quad(player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
 }
 
-void Levels::serialize_level(Level *level, Serialization::Stream *stream)
+void Levels::serialize_level(Serialization::Stream *stream, Level *level)
 {
     // Write the header
     Serialization::write_stream(stream, level->grid.width);
@@ -403,9 +403,12 @@ void Levels::serialize_level(Level *level, Serialization::Stream *stream)
             }
         }
     }
+
+    Serialization::write_stream(stream, level->player.position);
+    Serialization::write_stream(stream, level->player.color);
 }
 
-void Levels::deserialize_level(Level *level, Serialization::Stream *stream)
+void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
 {
     // Read the header
     Serialization::read_stream(stream, &(level->grid.width));
@@ -424,6 +427,9 @@ void Levels::deserialize_level(Level *level, Serialization::Stream *stream)
             level->grid.at(pos)->filled = (c == '1');
         }
     }
+
+    Serialization::read_stream(stream, &(level->player.position));
+    Serialization::read_stream(stream, &(level->player.color));
 }
 
 

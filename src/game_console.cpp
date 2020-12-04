@@ -1,6 +1,7 @@
 
 #include "game_console.h"
 #include "platform.h"
+#include "data_structures.h"
 
 #include "imgui.h"
 
@@ -9,11 +10,20 @@
 
 
 
+using namespace GameMath;
+
+
+
 struct GameConsoleState
 {
-    static const int SIZE = 1024 * 1024 * 4;
-    char *text_buffer;
-    char *current;
+    struct Entry
+    {
+        DynamicArray<char> text;
+        v3 color;
+    };
+
+    DynamicArray<Entry> entries;
+
 };
 GameConsoleState *GameConsole::instance = nullptr;
 
@@ -23,24 +33,32 @@ void GameConsole::init()
 {
     instance = (GameConsoleState *)Platform::Memory::allocate(sizeof(GameConsoleState));
 
-    instance->text_buffer = (char *)Platform::Memory::allocate(GameConsoleState::SIZE);
-    instance->current = instance->text_buffer;
+    instance->entries.init();
 }
 
-void GameConsole::write(const char *text)
+void GameConsole::write(const char *text, v3 color)
 {
-    int len = strlen(text);
-    strcpy(instance->current, text);
-    instance->current += len;
+    GameConsoleState::Entry entry;
+    entry.text.init();
+    entry.text.resize(strlen(text) + 1);
 
-    assert(instance->current < instance->text_buffer + 1024 * 1024 * 4);
+    entry.color = color;
+
+    strcpy(entry.text.data, text);
+
+    instance->entries.push_back(entry);
 }
 
 void GameConsole::draw()
 {
     ImGui::Begin("Console");
 
-    ImGui::Text(instance->text_buffer);
+    for(int i = 0; i < instance->entries.size; i++)
+    {
+        GameConsoleState::Entry *entry = &(instance->entries[i]);
+
+        ImGui::TextColored(ImVec4(entry->color.r, entry->color.g, entry->color.b, 1.0f), entry->text.data);
+    }
 
     ImGui::SetScrollHereY(1.0f);
 

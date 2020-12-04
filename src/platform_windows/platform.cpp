@@ -95,7 +95,9 @@ void Platform::init()
 
     BOOL result;
     RECT rect;
-    result = SystemParametersInfoA(SPI_GETWORKAREA, 0, &rect, 0);
+    //result = SystemParametersInfoA(SPI_GETWORKAREA, 0, &rect, 0);
+    rect.right = 1920 * 0.5f;
+    rect.bottom = rect.right * (9.0f / 16.0f);
     unsigned window_width = rect.right;
     unsigned window_height = rect.bottom;
     //unsigned window_width = GetSystemMetrics(SM_CXSCREEN);

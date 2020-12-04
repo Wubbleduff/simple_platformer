@@ -27,6 +27,8 @@ struct GameState
 
     double seconds_since_last_step;
     double last_loop_time;
+
+
     
     int num_levels;
     Levels::Level **levels;
@@ -39,7 +41,7 @@ struct GameState
 };
 static GameState *game_state;
 static const double TARGET_STEP_TIME = 0.01666; // In seconds
-static const double MAX_STEPS_PER_LOOP = 10;
+static const int MAX_STEPS_PER_LOOP = 10;
 
 
 
@@ -97,10 +99,12 @@ static void imgui_end_frame()
 
 static void serialize_game_state(Serialization::Stream *stream)
 {
+    Levels::serialize_level(stream, game_state->playing_level);
 }
 
 static void deserialize_game_state(Serialization::Stream *stream)
 {
+    Levels::deserialize_level(stream, game_state->playing_level);
 }
 
 static void switch_network_mode(Network::GameMode mode)
@@ -130,11 +134,6 @@ static void step_as_offline(float time_step)
     // Update the in game level
     Levels::step_level(game_state->playing_level, time_step);
 
-    if(Input::key(' '))
-    {
-        Log::log_info("jump!");
-    }
-
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
     imgui_begin_frame();
     ImGui::Begin("Debug");
@@ -160,8 +159,11 @@ static void step_as_client(float time_step)
     Network::Client::send_input_state_to_server();
 
     Serialization::Stream *game_state_stream = Serialization::make_stream();
-    Network::Client::read_game_state(game_state_stream);
-    deserialize_game_state(game_state_stream);
+    bool read = Network::Client::read_game_state(game_state_stream);
+    if(read)
+    {
+        deserialize_game_state(game_state_stream);
+    }
     Serialization::free_stream(game_state_stream);
 
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
@@ -190,8 +192,8 @@ static void step_as_client(float time_step)
 
 static void step_as_server(float time_step)
 {
+    Network::Server::read_client_input_states();
     Input::read_input();
-    //Network::Server::read_client_input_states();
 
     // Update the in game level
     Levels::step_level(game_state->playing_level, time_step);

@@ -8,20 +8,36 @@
 #include <stdio.h>
 
 
+
+using namespace GameMath;
+
+
+
 struct LogState
 {
     FILE *output_file;
+
+    enum Level
+    {
+        INFO,
+        WARNING,
+        ERROR
+    };
 };
 LogState *Log::instance = nullptr;
 
 
 
-static void log_message(LogState *instance, char *text)
+static void log_message(LogState *instance, char *text, LogState::Level level)
 {
     fprintf(instance->output_file, text);
     fflush(instance->output_file);
 
-    GameConsole::write(text);
+    v3 color = v3(1.0f, 1.0f, 1.0f);
+    if(level == LogState::INFO) color = v3(1.0f, 1.0f, 1.0f);
+    if(level == LogState::WARNING) color = v3(1.0f, 1.0f, 0.0f);
+    if(level == LogState::ERROR) color = v3(1.0f, 0.0f, 0.0f);
+    GameConsole::write(text, color);
 }
 
 
@@ -53,7 +69,7 @@ void Log::log_info_fn(const char *file, int line, const char *format, ...)
 
     va_end(args);
 
-    log_message(instance, text_memory);
+    log_message(instance, text_memory, LogState::INFO);
 }
 
 void Log::log_warning_fn(const char *file, int line, const char *format, ...)
@@ -76,7 +92,7 @@ void Log::log_warning_fn(const char *file, int line, const char *format, ...)
 
     va_end(args);
 
-    log_message(instance, text_memory);
+    log_message(instance, text_memory, LogState::WARNING);
 }
 
 void Log::log_error_fn(const char *file, int line, const char *format, ...)
@@ -99,5 +115,5 @@ void Log::log_error_fn(const char *file, int line, const char *format, ...)
 
     va_end(args);
 
-    log_message(instance, text_memory);
+    log_message(instance, text_memory, LogState::ERROR);
 }

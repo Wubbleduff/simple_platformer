@@ -22,7 +22,7 @@ struct Network
         static void init();
         static void connect_to_server(const char *ip_address, int port);
         static void send_input_state_to_server();
-        static void read_game_state(Serialization::Stream *game_state_stream);
+        static bool read_game_state(Serialization::Stream *game_state_stream);
     };
 
     // Server
@@ -30,7 +30,7 @@ struct Network
     {
         static void listen_for_client_connections(int port);
         static void accept_client_connections();
-        static void read_client_input_states();
+        static bool read_client_input_states();
         static void broadcast_game_state(Serialization::Stream *game_state_stream);
     };
 };

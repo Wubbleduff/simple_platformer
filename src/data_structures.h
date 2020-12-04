@@ -33,8 +33,8 @@ class DynamicArray
 
         void resize(int items)
         {
-            maybe_grow(n);
-            size = n;
+            maybe_grow(items);
+            size = items;
         }
 
         void reserve(int items)

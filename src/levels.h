@@ -12,8 +12,8 @@ struct Levels
     static void step_level(Level *level, float dt);
     static void draw_level(Level *level);
 
-    static void serialize_level(Level *level, Serialization::Stream *stream);
-    static void deserialize_level(Level *level, Serialization::Stream *stream);
+    static void serialize_level(Serialization::Stream *stream, Level *level);
+    static void deserialize_level(Serialization::Stream *stream, Level *level);
 };
 
 
