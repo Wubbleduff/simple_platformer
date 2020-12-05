@@ -1,12 +1,13 @@
 
+#include "game.h"
 #include "logging.h"
-#include "engine.h"
-#include "input.h"
 #include "data_structures.h"
+#include "graphics.h"
 
 #include "platform_windows/platform_windows.h"
 #include <cstdlib>
 #include <cstdio>
+#include <cassert>
 
 
 
@@ -18,6 +19,20 @@ struct PlatformState
         int width;
         int height;
     } window;
+
+    struct InputState
+    {
+        static const int MAX_KEYS = 256;
+        static const int MAX_MOUSE_KEYS = 8;
+
+        bool current_key_states[MAX_KEYS];
+        bool previous_key_states[MAX_KEYS];
+        bool event_key_states[MAX_KEYS]; // For recording windows key press events
+
+        bool current_mouse_states[MAX_MOUSE_KEYS];
+        bool previous_mouse_states[MAX_MOUSE_KEYS];
+        bool event_mouse_states[MAX_MOUSE_KEYS]; // For recording windows key press events
+    } input;
 
     bool want_to_close;
 
@@ -48,19 +63,19 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         } break;
         case WM_KEYDOWN:
         {
-            Input::record_key_event(wParam, true);
+            Platform::Input::record_key_event(wParam, true);
         } break;
         case WM_KEYUP:  
         {
-            Input::record_key_event(wParam, false);
+            Platform::Input::record_key_event(wParam, false);
         } break;
         case WM_LBUTTONDOWN:
         {
-            Input::record_mouse_event(0, true);
+            Platform::Input::record_mouse_event(0, true);
         } break;
         case WM_LBUTTONUP:  
         {
-            Input::record_mouse_event(0, false);
+            Platform::Input::record_mouse_event(0, false);
         } break;
         default:
         {
@@ -139,6 +154,21 @@ void Platform::init()
     {
         // Failed to create directory.
     }
+
+
+    // Input
+    {
+        Platform::Memory::memset(instance->input.current_key_states,  0, sizeof(bool) * PlatformState::InputState::MAX_KEYS);
+        Platform::Memory::memset(instance->input.previous_key_states, 0, sizeof(bool) * PlatformState::InputState::MAX_KEYS);
+        Platform::Memory::memset(instance->input.event_key_states,    0, sizeof(bool) * PlatformState::InputState::MAX_KEYS);
+
+        Platform::Memory::memset(instance->input.current_mouse_states, 0,
+                sizeof(bool) * PlatformState::InputState::MAX_MOUSE_KEYS);
+        Platform::Memory::memset(instance->input.previous_mouse_states, 0,
+                sizeof(bool) * PlatformState::InputState::MAX_MOUSE_KEYS);
+        Platform::Memory::memset(instance->input.event_mouse_states, 0,
+                sizeof(bool) * PlatformState::InputState::MAX_MOUSE_KEYS);
+    }
 }
 
 void Platform::handle_os_events()
@@ -157,7 +187,7 @@ void Platform::handle_os_events()
 
     if(instance->want_to_close)
     {
-        stop_engine();
+        Game::stop();
     }
 }
 
@@ -397,6 +427,77 @@ char *Platform::FileSystem::read_file_into_string(const char *path)
 
     return buffer;
 }
+
+
+
+// For recording windows key press events
+void Platform::Input::record_key_event(int vk_code, bool state)
+{
+    instance->input.event_key_states[vk_code] = state;
+}
+
+// For recording windows key press events
+void Platform::Input::record_mouse_event(int vk_code, bool state)
+{
+    instance->input.event_mouse_states[vk_code] = state;
+}
+
+void Platform::Input::read_input()
+{
+    // Read keyboard input
+    Platform::Memory::memcpy(instance->input.previous_key_states, instance->input.current_key_states, sizeof(bool) * PlatformState::InputState::MAX_KEYS);
+    Platform::Memory::memcpy(instance->input.current_key_states, instance->input.event_key_states, sizeof(bool) * PlatformState::InputState::MAX_KEYS);
+
+    // Read mouse input
+    Platform::Memory::memcpy(instance->input.previous_mouse_states, instance->input.current_mouse_states, sizeof(bool) * PlatformState::InputState::MAX_MOUSE_KEYS);
+    Platform::Memory::memcpy(instance->input.current_mouse_states, instance->input.event_mouse_states, sizeof(bool) * PlatformState::InputState::MAX_MOUSE_KEYS);
+}
+
+
+bool Platform::Input::key_down(int key)
+{
+    assert(key < PlatformState::InputState::MAX_KEYS);
+    return (instance->input.previous_key_states[key] == false && instance->input.current_key_states[key] == true) ? true : false;
+}
+
+bool Platform::Input::key(int key)
+{
+    assert(key < PlatformState::InputState::MAX_KEYS);
+    return instance->input.current_key_states[key];
+}
+
+
+bool Platform::Input::mouse_button_down(int key)
+{
+    assert(key < PlatformState::InputState::MAX_MOUSE_KEYS);
+    return (instance->input.previous_mouse_states[key] == false && instance->input.current_mouse_states[key] == true) ? true : false;
+}
+
+bool Platform::Input::mouse_button(int key)
+{
+    assert(key < PlatformState::InputState::MAX_MOUSE_KEYS);
+    return instance->input.current_mouse_states[key];
+}
+
+GameMath::v2 Platform::Input::mouse_world_position()
+{
+    int sx, sy;
+    Platform::Window::mouse_screen_position(&sx, &sy);
+    GameMath::v2 p = GameMath::v2((float)sx, (float)sy);
+    float screen_width = Platform::Window::screen_width();
+    float screen_height = Platform::Window::screen_height();
+
+    p.y = screen_height - p.y;
+
+    GameMath::v2 ndc =
+    {
+        (p.x / screen_width)  * 2.0f - 1.0f,
+        (p.y / screen_height) * 2.0f - 1.0f,
+    };
+
+    return Graphics::ndc_point_to_world(ndc);
+}
+
 
 
 

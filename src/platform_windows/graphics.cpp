@@ -1,7 +1,6 @@
 
 #include "graphics.h"
 #include "logging.h"
-#include "engine.h"
 #include "platform.h"
 #include "game_math.h"
 #include "shader.h"

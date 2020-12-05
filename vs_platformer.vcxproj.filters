@@ -11,35 +11,11 @@
     <Filter Include="imgui">
       <UniqueIdentifier>{afc90d60-1f46-47c8-83a8-ac71b6a76695}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\platform_windows">
+      <UniqueIdentifier>{31984dec-9cca-47d7-8182-d05e531d6911}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\algorithms.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\engine.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\graphics.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\input.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\level.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\main.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\platform.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\serialization.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\shader.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
     <ClCompile Include="lib\imgui\imgui.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
@@ -58,27 +34,81 @@
     <ClCompile Include="lib\imgui\examples\imgui_impl_win32.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
+    <ClCompile Include="src\algorithms.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\data_structures.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\game.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\game_console.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\game_math.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\levels.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\logging.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\player.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\serialization.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\platform_windows\graphics.cpp">
+      <Filter>src\platform_windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\platform_windows\main.cpp">
+      <Filter>src\platform_windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\platform_windows\network.cpp">
+      <Filter>src\platform_windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\platform_windows\platform.cpp">
+      <Filter>src\platform_windows</Filter>
+    </ClCompile>
+    <ClCompile Include="src\platform_windows\shader.cpp">
+      <Filter>src\platform_windows</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\algorithms.h">
       <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="src\engine.h">
+    <ClInclude Include="src\data_structures.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game_console.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game_math.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\graphics.h">
       <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="src\input.h">
+    <ClInclude Include="src\levels.h">
       <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="src\level.h">
+    <ClInclude Include="src\logging.h">
       <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="src\my_math.h">
+    <ClInclude Include="src\network.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\platform.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\player.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\serialization.h">
@@ -86,6 +116,9 @@
     </ClInclude>
     <ClInclude Include="src\shader.h">
       <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\platform_windows\platform_windows.h">
+      <Filter>src\platform_windows</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

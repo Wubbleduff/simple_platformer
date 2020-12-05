@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include "game_math.h"
+
 struct Platform
 {
     static struct PlatformState *instance;
@@ -48,5 +50,18 @@ struct Platform
         static char *read_file_into_string(const char *path);
     };
 
+    struct Input
+    {
+        static bool key_down(int button);
+        static bool key_up(int button);
+        static bool key(int button);
+        static bool mouse_button_down(int button);
+        static bool mouse_button_up(int button);
+        static bool mouse_button(int button);
+        static GameMath::v2 mouse_world_position();
+        static void read_input();
+        static void record_key_event(int vk_code, bool state);
+        static void record_mouse_event(int vk_code, bool state);
+    };
 };
 

@@ -5,8 +5,6 @@
 #include "algorithms.h"
 #include "data_structures.h"
 #include "graphics.h"
-#include "engine.h"
-#include "input.h"
 #include "serialization.h"
 
 //#include "imgui.h"
@@ -104,9 +102,13 @@ struct Grid
     }
 };
 
-struct Player
+struct Avatar
 {
+    PlayerID player_id;
+
     v2 position;
+    v4 color;
+
     bool grounded;
 
     float horizontal_velocity;
@@ -118,8 +120,6 @@ struct Player
     float gravity;
 
     float full_extent;
-
-    v4 color;
 };
 
 
@@ -127,8 +127,9 @@ struct Levels::Level
 {
     Grid grid;
 
-    Player player;
+    DynamicArray<Avatar *> avatars;
 };
+
 
 
 static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
@@ -175,6 +176,7 @@ static void reset_level(Levels::Level *level)
         level->grid.at(pos)->filled = true;
     }
 
+    /*
     level->player.position = v2(0.0f, 4.0f);
     level->player.grounded = false;
 
@@ -188,12 +190,14 @@ static void reset_level(Levels::Level *level)
 
     level->player.full_extent = 1.0f;
     level->player.color = v4(1.0f, 0.0f, 0.5f, 1.0f);
+    */
 }
 
 
 
 static void check_and_resolve_collisions(Levels::Level *level)
 {
+    /*
     Player *player = &(level->player);
     v2 player_bl = player->position - v2(1.0f, 1.0f) * player->full_extent * 0.5f;
     v2 player_tr = player->position + v2(1.0f, 1.0f) * player->full_extent * 0.5f;
@@ -273,6 +277,7 @@ static void check_and_resolve_collisions(Levels::Level *level)
     {
         player->horizontal_velocity = 0.0f;
     }
+    */
 }
 
 
@@ -288,73 +293,86 @@ Levels::Level *Levels::create_level()
     return level;
 }
 
-void Levels::step_level(Level *level, float dt)
+void add_avatar(PlayerID id)
 {
-    if(Input::key_down('R'))
-    {
-        reset_level(level);
-    }
+    //game_state->avatars[id].create();
+}
 
-    if(Input::mouse_button(0))
-    {
-        v2i cell = level->grid.world_to_cell(Input::mouse_world_position());
-        level->grid.at(cell)->filled = true;
-    }
+void remove_avatar(PlayerID id)
+{
+    //game_state->avatars.remove(id);
+}
 
-    Player *player = &(level->player);
-
+static void step_avatar(Avatar *avatar, Levels::Level *level, float dt)
+{
     float horizontal_acceleration = 0.0f;
     float vertical_acceleration = 0.0f;
 
-    if(Input::key('D'))
+    bool moving_right = Players::action(avatar->player_id, Players::Action::MOVE_RIGHT);
+    bool moving_left = Players::action(avatar->player_id, Players::Action::MOVE_LEFT);
+    bool jump = Players::action(avatar->player_id, Players::Action::JUMP);
+
+    if(moving_right)
     {
-        horizontal_acceleration += player->run_strength;
+        horizontal_acceleration += avatar->run_strength;
     }
-    if(Input::key('A'))
+    if(moving_left)
     {
-        horizontal_acceleration -= player->run_strength;
+        horizontal_acceleration -= avatar->run_strength;
     }
-    
 
-
-    if(player->grounded)
+    if(avatar->grounded)
     {
-        player->vertical_velocity = 0.0f;
+        avatar->vertical_velocity = 0.0f;
 
-        if(Input::key_down(' '))
+        if(jump)
         {
-            player->vertical_velocity = 20.0f;
-            player->grounded = false;
+            avatar->vertical_velocity = 20.0f;
+            avatar->grounded = false;
         }
     }
     else
     {
-        //vertical_acceleration -= player->gravity * player->mass;
+        //vertical_acceleration -= avatar->gravity * avatar->mass;
     }
-    vertical_acceleration -= player->gravity * player->mass;
+    vertical_acceleration -= avatar->gravity * avatar->mass;
 
-    horizontal_acceleration -= player->horizontal_velocity * player->friction_strength;
+    horizontal_acceleration -= avatar->horizontal_velocity * avatar->friction_strength;
 
-    player->horizontal_velocity += horizontal_acceleration * dt;
-    player->vertical_velocity += vertical_acceleration * dt;
+    avatar->horizontal_velocity += horizontal_acceleration * dt;
+    avatar->vertical_velocity += vertical_acceleration * dt;
 
-    player->position.x += player->horizontal_velocity * dt;
-    player->position.y += player->vertical_velocity * dt;
+    avatar->position.x += avatar->horizontal_velocity * dt;
+    avatar->position.y += avatar->vertical_velocity * dt;
+
 
 
     check_and_resolve_collisions(level);
 }
 
+void Levels::step_level(Level *level, float dt)
+{
+    /*
+    for(Avatar &avatar : level->avatars)
+    {
+        step_avatar(level, dt);
+    }
+    */
+}
+
 void Levels::draw_level(Level *level)
 {
-    Player *player = &(level->player);
-
     v2 camera_offset = v2(16.0f, 4.0f);
     Graphics::set_camera_width(64.0f);
-    Graphics::set_camera_position(player->position + camera_offset);
+    Graphics::set_camera_position(v2() + camera_offset);
 
     // Draw the player
-    Graphics::draw_quad(v2(), v2(0.25f, 0.25f), PI / 4.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
+    /*
+    for(Avatar &avatar : level->avatars)
+    {
+        Graphics::draw_quad(player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
+    }
+    */
 
     // Draw grid terrain
     v2i tl = level->grid.top_left();
@@ -375,8 +393,6 @@ void Levels::draw_level(Level *level)
             }
         }
     }
-
-    Graphics::draw_quad(player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
 }
 
 void Levels::serialize_level(Serialization::Stream *stream, Level *level)
@@ -404,8 +420,8 @@ void Levels::serialize_level(Serialization::Stream *stream, Level *level)
         }
     }
 
-    Serialization::write_stream(stream, level->player.position);
-    Serialization::write_stream(stream, level->player.color);
+    //Serialization::write_stream(stream, level->player.position);
+    //Serialization::write_stream(stream, level->player.color);
 }
 
 void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
@@ -428,8 +444,8 @@ void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
         }
     }
 
-    Serialization::read_stream(stream, &(level->player.position));
-    Serialization::read_stream(stream, &(level->player.color));
+    //Serialization::read_stream(stream, &(level->player.position));
+    //Serialization::read_stream(stream, &(level->player.color));
 }
 
 

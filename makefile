@@ -17,14 +17,14 @@ src\platform_windows\platform.cpp \
 src\platform_windows\network.cpp \
 src\platform_windows\graphics.cpp \
 src\platform_windows\shader.cpp \
-src\engine.cpp \
+src\game.cpp \
 src\logging.cpp \
 src\game_math.cpp \
 src\data_structures.cpp \
 src\algorithms.cpp \
-src\input.cpp \
 src\game_console.cpp \
 src\levels.cpp \
+src\player.cpp \
 src\serialization.cpp \
 lib\imgui\imgui.cpp \
 lib\imgui\imgui_demo.cpp \

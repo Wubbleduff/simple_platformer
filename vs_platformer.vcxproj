@@ -26,23 +26,33 @@
     <ClCompile Include="lib\imgui\imgui_draw.cpp" />
     <ClCompile Include="lib\imgui\imgui_widgets.cpp" />
     <ClCompile Include="src\algorithms.cpp" />
-    <ClCompile Include="src\engine.cpp" />
-    <ClCompile Include="src\graphics.cpp" />
-    <ClCompile Include="src\input.cpp" />
-    <ClCompile Include="src\level.cpp" />
-    <ClCompile Include="src\main.cpp" />
-    <ClCompile Include="src\platform.cpp" />
+    <ClCompile Include="src\data_structures.cpp" />
+    <ClCompile Include="src\game.cpp" />
+    <ClCompile Include="src\game_console.cpp" />
+    <ClCompile Include="src\game_math.cpp" />
+    <ClCompile Include="src\levels.cpp" />
+    <ClCompile Include="src\logging.cpp" />
+    <ClCompile Include="src\platform_windows\graphics.cpp" />
+    <ClCompile Include="src\platform_windows\main.cpp" />
+    <ClCompile Include="src\platform_windows\network.cpp" />
+    <ClCompile Include="src\platform_windows\platform.cpp" />
+    <ClCompile Include="src\platform_windows\shader.cpp" />
+    <ClCompile Include="src\player.cpp" />
     <ClCompile Include="src\serialization.cpp" />
-    <ClCompile Include="src\shader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\algorithms.h" />
-    <ClInclude Include="src\engine.h" />
+    <ClInclude Include="src\data_structures.h" />
+    <ClInclude Include="src\game.h" />
+    <ClInclude Include="src\game_console.h" />
+    <ClInclude Include="src\game_math.h" />
     <ClInclude Include="src\graphics.h" />
-    <ClInclude Include="src\input.h" />
-    <ClInclude Include="src\level.h" />
-    <ClInclude Include="src\my_math.h" />
+    <ClInclude Include="src\levels.h" />
+    <ClInclude Include="src\logging.h" />
+    <ClInclude Include="src\network.h" />
     <ClInclude Include="src\platform.h" />
+    <ClInclude Include="src\platform_windows\platform_windows.h" />
+    <ClInclude Include="src\player.h" />
     <ClInclude Include="src\serialization.h" />
     <ClInclude Include="src\shader.h" />
   </ItemGroup>
@@ -67,6 +77,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v142</PlatformToolset>
+    <VCToolsVersion />
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -136,7 +147,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Link>
-      <AdditionalDependencies>opengl32.lib;glew32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opengl32.lib;glew32.lib;Ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

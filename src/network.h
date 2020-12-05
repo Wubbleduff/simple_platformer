@@ -31,7 +31,7 @@ struct Network
         static void listen_for_client_connections(int port);
         static void accept_client_connections();
         static bool read_client_input_states();
-        static void broadcast_game_state(Serialization::Stream *game_state_stream);
+        static void broadcast_game(Serialization::Stream *game_stream);
     };
 };
 

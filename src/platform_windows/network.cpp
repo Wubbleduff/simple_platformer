@@ -1,7 +1,6 @@
 
 #include "network.h"
 #include "logging.h"
-#include "input.h"
 #include "platform.h"
 
 
@@ -250,7 +249,7 @@ void Network::Client::send_input_state_to_server()
 
     Serialization::Stream *stream = Serialization::make_stream();
 
-    Input::serialize_input_state(stream);
+    //Input::serialize_input_state(stream);
 
     send_stream(server, stream);
 
@@ -370,7 +369,7 @@ bool Network::Server::read_client_input_states()
         if(read)
         {
             Serialization::reset_stream(stream);
-            Input::deserialize_input_state(stream);
+            //Input::deserialize_input_state(stream);
             read_any_data = true;
         }
     }
@@ -401,14 +400,14 @@ bool Network::Server::read_client_input_states()
     return read_any_data;
 }
 
-void Network::Server::broadcast_game_state(Serialization::Stream *game_state_stream)
+void Network::Server::broadcast_game(Serialization::Stream *game_stream)
 {
     for(int i = 0; i < instance->server.num_client_connections; i++)
     {
         Connection *client_connection = &(instance->server.client_connections[i]);
         if(!client_connection->connected) continue;
 
-        send_stream(client_connection, game_state_stream);
+        send_stream(client_connection, game_stream);
     }
 }
 
