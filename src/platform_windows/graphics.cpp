@@ -526,4 +526,11 @@ void Graphics::ImGuiImplementation::end_frame()
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
+void Graphics::ImGuiImplementation::shutdown()
+{
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+}
+
 

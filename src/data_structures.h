@@ -47,6 +47,12 @@ class DynamicArray
             size = 0;
         }
 
+        void remove_unordered(int i)
+        {
+            data[i] = data[size - 1];
+            size--;
+        }
+
 
         //DynamicArray() {}
 

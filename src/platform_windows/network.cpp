@@ -2,6 +2,7 @@
 #include "network.h"
 #include "logging.h"
 #include "platform.h"
+#include "data_structures.h"
 
 
 #include <WinSock2.h> // Networking API
@@ -18,41 +19,207 @@ enum BlockingMode
     NONBLOCKING
 };
 
-struct Connection
-{
-    bool connected;
-    SOCKET tcp_socket;
-    char ip_address[16];
-    int port;
-};
-
-struct NetworkState
-{
-    struct ClientState
-    {
-        Connection server_connection;
-    };
-    ClientState client;
-
-    struct ServerState
-    {
-        static const int MAX_CLIENTS = 8;
-        int num_client_connections;
-        Connection *client_connections;
-
-        SOCKET listening_socket;
-    };
-    ServerState server;
-
-};
-NetworkState *Network::instance = nullptr;
-
 
 
 static int get_last_error()
 {
     return WSAGetLastError();
 }
+
+static bool read_bytes_from_socket(SOCKET socket, char *buffer, int max_bytes_to_read, int *bytes_actually_read)
+{
+    // Listen for a response
+    long int bytes_read_from_socket = recv(socket, buffer, max_bytes_to_read, 0);
+
+    *bytes_actually_read = (int)bytes_read_from_socket;
+
+    // Check if bytes were read
+    if(*bytes_actually_read == -1)
+    {
+        // Bytes weren't read, make sure there's an expected error code
+        if(get_last_error() != CODE_WOULD_BLOCK)
+        {
+            Log::log_error("Error receiving data: %i\n", get_last_error());
+        }
+        return false;
+    }
+    else
+    {
+        // Bytes were read
+        return true;
+    }
+}
+
+static void set_blocking_mode(SOCKET socket, BlockingMode mode)
+{
+    u_long code = (mode == BLOCKING) ? 0 : 1;
+    int error = ioctlsocket(socket, FIONBIO, &code);
+}
+
+struct Connection
+{
+    bool connected;
+    SOCKET tcp_socket;
+    char ip_address[16];
+    int port;
+
+
+
+    struct Header
+    {
+        int content_size;
+    };
+
+    static const int RECEIVE_BUFFER_SIZE = 1024 * 2;
+    union
+    {
+        char *receive_buffer;
+        Header *buffer_header;
+    };
+    char *receive_target;
+    static const int HEADER_SIZE = sizeof(Header);
+
+
+
+    void disconnect()
+    {
+        connected = false;
+
+        set_blocking_mode(tcp_socket, BLOCKING);
+
+        int result = ::shutdown(tcp_socket, SD_SEND);
+        if(result == SOCKET_ERROR)
+        {
+            Log::log_error("Could not end connection to server properly");
+            return;
+        }
+
+        while(true)
+        {
+            int received_bytes = 0;
+            bool success = read_bytes_from_socket(tcp_socket,
+                receive_buffer, RECEIVE_BUFFER_SIZE, &received_bytes);
+            if(!success) break;
+            if(success && received_bytes == 0) break;
+        }
+
+        closesocket(tcp_socket);
+    }
+
+    void send_stream(Serialization::Stream *stream)
+    {
+        // Send data over TCP
+        char *data = Serialization::stream_data(stream);
+        int bytes = Serialization::stream_size(stream);
+
+        long int bytes_queued = send(tcp_socket, data, bytes, 0);
+        if(bytes_queued == SOCKET_ERROR)
+        {
+            Log::log_error("Error sending data: %i\n", get_last_error());
+        }
+
+        if(bytes_queued != bytes)
+        {
+            Log::log_warning("Couldn't queue the requested number of bytes for sending. Requested: %i - Queued: %i", bytes, bytes_queued);
+        }
+    }
+
+
+
+
+    bool expecting_header()
+    {
+        char *content = receive_buffer + Connection::HEADER_SIZE;
+        return (receive_target < content);
+    }
+
+    void try_receive_data(int receive_up_to_bytes)
+    {
+        char **receive_buffer_target = &(receive_buffer);
+        const char *receive_buffer_end = receive_buffer + receive_up_to_bytes;
+
+        bool received_new_data = true;
+        while(received_new_data && *receive_buffer_target != receive_buffer_end)
+        {
+            // Recieve the data
+            int bytes_to_receive = receive_buffer_end - *receive_buffer_target;
+            int received_bytes;
+            received_new_data = read_bytes_from_socket(tcp_socket,
+                    *receive_buffer_target, bytes_to_receive, &received_bytes);
+
+            if(received_new_data)
+            {
+                if(received_bytes == 0)
+                {
+                    // Client closed the connection
+                    connected = false;
+                    return;
+                }
+                else
+                {
+                    *receive_buffer_target += received_bytes;
+                }
+            }
+        }
+    }
+
+    void update_receive_state()
+    {
+        if(expecting_header())
+        {
+            try_receive_data(HEADER_SIZE);
+            if(!connected) return;
+        }
+        else
+        {
+            try_receive_data(HEADER_SIZE + buffer_header->content_size);
+            if(!connected) return;
+        }
+    }
+
+    void reset_receive_state()
+    {
+        receive_target = receive_buffer;
+    }
+
+    bool ready_to_read()
+    {
+        if(expecting_header()) return false;
+
+        char *receive_end = receive_buffer + HEADER_SIZE + buffer_header->content_size;
+        return receive_target == receive_end;
+    }
+
+    void read_into_stream(Serialization::Stream *stream)
+    {
+        int content_bytes = buffer_header->content_size;
+        char *content = receive_buffer + HEADER_SIZE;
+        Serialization::write_stream_array(stream, content_bytes, content);
+        reset_receive_state();
+    }
+};
+
+
+
+struct NetworkState
+{
+    struct ClientState
+    {
+        Connection *server_connection;
+    };
+    ClientState client;
+
+    struct ServerState
+    {
+        DynamicArray<Connection *> client_connections;
+        SOCKET listening_socket;
+    };
+    ServerState server;
+};
+NetworkState *Network::instance = nullptr;
+
+
+
 
 static void init_winsock()
 {
@@ -71,94 +238,29 @@ static void cleanup_winsock()
     if(error == -1) Log::log_error("Error unloading networking module: %i\n", get_last_error());
 }
 
-static void set_blocking_mode(SOCKET socket, BlockingMode mode)
+static Connection *make_connection()
 {
-    u_long code = (mode == BLOCKING) ? 0 : 1;
-    int error = ioctlsocket(socket, FIONBIO, &code);
+    Connection *new_connection = (Connection *)Platform::Memory::allocate(sizeof(Connection));
+    new_connection->connected = false;
+    new_connection->tcp_socket = INVALID_SOCKET;
+    Platform::Memory::memset(new_connection->ip_address, 0, sizeof(new_connection->ip_address));
+    new_connection->port = 0;
+
+    return new_connection;
 }
 
-static void add_client_connection_to_server(NetworkState *instance, SOCKET client_socket,
-        const char *ip_address_string, int port)
+static void destroy_connection(Connection **connection)
 {
-    Connection *new_connection = &(instance->server.client_connections[instance->server.num_client_connections++]);
-    new_connection->tcp_socket = client_socket;
-    strcpy(new_connection->ip_address, ip_address_string);
-    new_connection->port = port;
-    new_connection->connected = true;
+    (*connection)->disconnect();
+    Platform::Memory::free(*connection);
+    *connection = nullptr;
 }
 
-static void send_stream(Connection *connection, Serialization::Stream *stream)
-{
-    // Send data over TCP
-    char *data = Serialization::stream_data(stream);
-    int bytes = Serialization::stream_size(stream);
 
-    long int bytes_queued = send(connection->tcp_socket, data, bytes, 0);
-    if(bytes_queued == SOCKET_ERROR)
-    {
-        Log::log_error("Error sending data: %i\n", get_last_error());
-    }
 
-    if(bytes_queued != bytes)
-    {
-        Log::log_warning("Couldn't queue the requested number of bytes for sending. Requested: %i - Queued: %i", bytes, bytes_queued);
-    }
 
-    //return (int)bytes_queued;
-}
 
-static bool read_bytes_from_socket(SOCKET socket, char *buffer, int max_bytes_to_read, int *bytes_actually_read)
-{
-    // Listen for a response
-    long int bytes_read_from_socket = recv(socket, buffer, max_bytes_to_read, 0);
 
-    *bytes_actually_read = (int)bytes_read_from_socket;
-
-    // Check if bytes were read
-    if(*bytes_actually_read == -1)
-    {
-        // Bytes weren't read, make sure there's an expected error code
-        if(get_last_error() != CODE_WOULD_BLOCK)
-        {
-            Log::log_error("Error recieving data: %i\n", get_last_error());
-        }
-        return false;
-    }
-    else
-    {
-        // Bytes were read
-        return true;
-    }
-}
-
-static bool read_into_stream(Connection *connection, Serialization::Stream *stream)
-{
-    bool read_any_data = false;
-
-    // TODO: This can be moved to the instance scope
-    static const int RECEIVE_BUFFER_SIZE = 1024 * 2;
-    char *receive_buffer = (char *)Platform::Memory::allocate(RECEIVE_BUFFER_SIZE);;
-
-    // Read in entire stream
-    bool received_new_data = false;
-    do
-    {
-        // Recieve the data
-        int received_bytes;
-        received_new_data = read_bytes_from_socket(connection->tcp_socket,
-                receive_buffer, RECEIVE_BUFFER_SIZE, &received_bytes);
-
-        if(received_new_data)
-        {
-            Serialization::write_stream_array(stream, received_bytes, receive_buffer);
-            read_any_data = true;
-        }
-
-    } while(received_new_data);
-
-    Platform::Memory::free(receive_buffer);
-    return read_any_data;
-}
 
 
 
@@ -170,37 +272,38 @@ void Network::init()
 
     // Client
     {
-        instance->client.server_connection = {};
+        instance->client.server_connection = nullptr;
     }
 
     // Server
     {
-        instance->server.num_client_connections = 0;
-        instance->server.client_connections =
-            (Connection *)Platform::Memory::allocate(sizeof(Connection) * NetworkState::ServerState::MAX_CLIENTS);
-        for(int i = 0; i < NetworkState::ServerState::MAX_CLIENTS; i++)
-        {
-            instance->server.client_connections[i] = {};
-        }
+        instance->server.client_connections.init();
+        instance->server.listening_socket = INVALID_SOCKET;
     }
 }
 
 // Client
-void Network::Client::init()
+void Network::Client::disconnect()
 {
-    instance->client.server_connection.tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if(instance->client.server_connection.tcp_socket == SOCKET_ERROR)
-    {
-        Log::log_error("Error opening socket: %i\n", get_last_error());
-        return;
-    }
+    if(!instance->client.server_connection->connected) return;
+
+    destroy_connection(&(instance->client.server_connection));
 }
 
 void Network::Client::connect_to_server(const char *ip_address, int port)
 {
-    SOCKET &socket = instance->client.server_connection.tcp_socket;
+    instance->client.server_connection = make_connection();
 
-    set_blocking_mode(socket, BLOCKING);
+    SOCKET &client_socket = instance->client.server_connection->tcp_socket;
+
+    client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if(client_socket == SOCKET_ERROR)
+    {
+        Log::log_error("Error opening socket: %i\n", get_last_error());
+        return;
+    }
+
+    set_blocking_mode(client_socket, BLOCKING);
 
     // Create address
     sockaddr_in address = {};
@@ -214,13 +317,13 @@ void Network::Client::connect_to_server(const char *ip_address, int port)
     }
 
     // Try to connect
-    int code = connect(socket, (sockaddr *)(&address), sizeof(address));
+    int code = connect(client_socket, (sockaddr *)(&address), sizeof(address));
     int status = get_last_error();
 
     // While not connected, try to reconnect
     while(code != 0 && status != CODE_IS_CONNECTED)
     {
-        code = connect(socket, (sockaddr *)(&address), sizeof(address));
+        code = connect(client_socket, (sockaddr *)(&address), sizeof(address));
         status = get_last_error();
 
         if(status == CODE_INVALID)
@@ -231,47 +334,75 @@ void Network::Client::connect_to_server(const char *ip_address, int port)
         }
     }
 
-    set_blocking_mode(socket, NONBLOCKING);
+    set_blocking_mode(client_socket, NONBLOCKING);
 
-    strcpy(instance->client.server_connection.ip_address, ip_address);
-
-    instance->client.server_connection.port = port;
-
-    instance->client.server_connection.connected = true;
-
-    //return error;
+    strcpy(instance->client.server_connection->ip_address, ip_address);
+    instance->client.server_connection->port = port;
+    instance->client.server_connection->connected = true;
 }
 
 void Network::Client::send_input_state_to_server()
 {
-    Connection *server = &(instance->client.server_connection);
-    if(!server->connected) return;
+    Connection *server = instance->client.server_connection;
+    if(server && server->connected)
+    {
+        Serialization::Stream *stream = Serialization::make_stream();
 
-    Serialization::Stream *stream = Serialization::make_stream();
+        //Input::serialize_input_state(stream);
 
-    //Input::serialize_input_state(stream);
+        server->send_stream(stream);
 
-    send_stream(server, stream);
-
-    Serialization::free_stream(stream);
+        Serialization::free_stream(stream);
+    }
 }
 
-bool Network::Client::read_game_state(Serialization::Stream *stream)
+Network::ReadResult Network::Client::read_game_state(Serialization::Stream *stream)
 {
-    Connection *server = &(instance->client.server_connection);
-    if(!server->connected) return false;
-
-    bool read = read_into_stream(server, stream);
-    if(read)
+    Connection *server = instance->client.server_connection;
+    if(!server || !server->connected)
     {
-        Serialization::reset_stream(stream);
+        return Network::ReadResult::CLOSED;
     }
-    return read;
+
+    // Update the connection data (read into buffer) and state (closed or still open)
+    server->update_receive_state();
+
+    // Check if the connection was closed after the read
+    if(!server->connected)
+    {
+        destroy_connection(&(instance->client.server_connection));
+        return Network::ReadResult::CLOSED;
+    }
+
+    // Check if game data is ready to be read
+    if(server->ready_to_read())
+    {
+        server->read_into_stream(stream);
+        return Network::ReadResult::READY;
+    }
+    else
+    {
+        return Network::ReadResult::NOT_READY;
+    }
 }
 
 
 
 // Server
+void Network::Server::disconnect()
+{
+    Connection *server = instance->client.server_connection;
+    if(!server || !server->connected) return;
+
+    for(int i = 0; i < instance->server.client_connections.size; i++)
+    {
+        Connection *client = instance->server.client_connections[i];
+        destroy_connection(&(instance->server.client_connections[i]));
+    }
+
+    instance->server.client_connections.clear();
+}
+
 void Network::Server::listen_for_client_connections(int port)
 {
     // Create a listening socket
@@ -320,8 +451,6 @@ void Network::Server::accept_client_connections()
     int return_code = 0;
     do
     {
-        if(instance->server.num_client_connections >= NetworkState::ServerState::MAX_CLIENTS) return;
-
         sockaddr_in client_address;
         int client_address_size = sizeof(sockaddr_in);
         SOCKET incoming_socket = accept(instance->server.listening_socket, (sockaddr *)(&client_address), &client_address_size);
@@ -340,74 +469,78 @@ void Network::Server::accept_client_connections()
         }
 
         // Valid socket
+        Connection *client_connection = make_connection();
+        client_connection->tcp_socket = incoming_socket;
         char string_buffer[16];
-        const char *client_address_string = inet_ntop(AF_INET, &client_address, string_buffer, sizeof(string_buffer));
-        int port = (int)client_address.sin_port;
-        add_client_connection_to_server(instance, incoming_socket, string_buffer, port);
+        client_connection->connected = true;
+        inet_ntop(AF_INET, &client_address, client_connection->ip_address, sizeof(client_connection->ip_address));
+        client_connection->port = (int)client_address.sin_port;
+        instance->server.client_connections.push_back(client_connection);
 
         time_t now;
         time(&now);
-        Log::log_info("%s: Client connected on port %i", ctime(&now), port);
+        Log::log_info("%s: Client connected on port %i", ctime(&now), client_connection->port);
 
     } while(return_code != CODE_WOULD_BLOCK);
 }
 
-bool Network::Server::read_client_input_states()
+Network::ReadResult Network::Server::read_client_input_states()
 {
-    bool read_any_data = false;
-
     Serialization::Stream *stream = Serialization::make_stream();
 
-    for(int i = 0; i < instance->server.num_client_connections; i++)
+    for(int i = 0; i < instance->server.client_connections.size; i++)
     {
-        Connection *client_connection = &(instance->server.client_connections[i]);
+        Connection *client = instance->server.client_connections[i];
 
-        if(!client_connection->connected) continue;
+        if(!client->connected) continue;
 
-        Serialization::clear_stream(stream);
-        bool read = read_into_stream(client_connection, stream);
-        if(read)
+        // Update the connection data (read into buffer) and state (closed or still open)
+        client->update_receive_state();
+
+        // Check if the connection was closed after the read
+        if(!client->connected)
         {
-            Serialization::reset_stream(stream);
-            //Input::deserialize_input_state(stream);
-            read_any_data = true;
+            //return Network::ReadResult::CLOSED;
+            Log::log_info("Client disconnected");
+            destroy_connection(&(instance->server.client_connections[i]));
+            continue;
+        }
+
+        // Check if game data is ready to be read
+        if(client->ready_to_read())
+        {
+            //client->read_into_stream(stream);
+            //return Network::ReadResult::READY;
+        }
+        else
+        {
+            //return Network::ReadResult::NOT_READY;
         }
     }
 
-    // DEBUG
-#if 0
+    // Clear all disconnected clients
+    for(int i = 0; i < instance->server.client_connections.size; i++)
     {
-        static int count = 0;
-        count++;
-        for(int i = 0; i < 256; i++)
+        if(instance->server.client_connections[i] == nullptr)
         {
-            int value = 0;
-            if(i == 'D') value = 1;
-            if(i == ' ') value = 1;
-            Serialization::write_stream(stream, value);
+            // Safe in loop
+            instance->server.client_connections.remove_unordered(i);
         }
-        for(int i = 0; i < 256; i++) Serialization::write_stream(stream, 0);
-        for(int i = 0; i < 8; i++) Serialization::write_stream(stream, 0);
-        for(int i = 0; i < 8; i++) Serialization::write_stream(stream, 0);
-
-        Serialization::reset_stream(stream);
-
-        Input::deserialize_input_state(stream);
     }
-#endif
 
     Serialization::free_stream(stream);
-    return read_any_data;
+
+    return ReadResult::CLOSED;
 }
 
 void Network::Server::broadcast_game(Serialization::Stream *game_stream)
 {
-    for(int i = 0; i < instance->server.num_client_connections; i++)
+    for(int i = 0; i < instance->server.client_connections.size; i++)
     {
-        Connection *client_connection = &(instance->server.client_connections[i]);
+        Connection *client_connection = instance->server.client_connections[i];
         if(!client_connection->connected) continue;
 
-        send_stream(client_connection, game_stream);
+        //client_connection->send_stream(game_stream);
     }
 }
 

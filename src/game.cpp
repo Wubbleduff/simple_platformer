@@ -20,6 +20,13 @@ using namespace GameMath;
 
 
 
+struct Player
+{
+    bool a;
+
+    bool current_actions[(int)Game::Players::Action::NUM_ACTIONS];
+};
+
 struct GameState
 {
     static const double TARGET_STEP_TIME;
@@ -34,7 +41,7 @@ struct GameState
 
 
 
-    DynamicArray<Players::Player *> players;
+    DynamicArray<Player *> players;
 
     int num_levels;
     Levels::Level **levels;
@@ -60,13 +67,14 @@ static void init_game(GameState **p_instance)
 
     instance->players.init();
 
-    Game::add_player();
+    int player1_id = Game::Players::add();
 
     instance->num_levels = 1;
     instance->levels = (Levels::Level **)Platform::Memory::allocate(sizeof(Levels::Level *) * instance->num_levels);
     for(int i = 0; i < instance->num_levels; i++)
     {
         instance->levels[i] = Levels::create_level();
+        Levels::add_avatar(instance->levels[i], player1_id);
     }
     instance->playing_level = instance->levels[0];
 }
@@ -99,6 +107,13 @@ static void imgui_end_frame()
     Graphics::ImGuiImplementation::end_frame();
 }
 
+void read_player_actions(Player *player)
+{
+    player->current_actions[(int)Game::Players::Action::MOVE_RIGHT] = Platform::Input::key('D');
+    player->current_actions[(int)Game::Players::Action::MOVE_LEFT] = Platform::Input::key('A');
+    player->current_actions[(int)Game::Players::Action::JUMP] = Platform::Input::key_down(' ');
+}
+
 static void serialize_game(GameState *instance, Serialization::Stream *stream)
 {
     Levels::serialize_level(stream, instance->playing_level);
@@ -119,7 +134,6 @@ static void switch_network_mode(GameState *instance, Network::GameMode mode)
     if(mode == Network::GameMode::CLIENT)
     {
         instance->network_mode = Network::GameMode::CLIENT;
-        Network::Client::init();
     }
 
     if(mode == Network::GameMode::SERVER)
@@ -131,12 +145,12 @@ static void switch_network_mode(GameState *instance, Network::GameMode mode)
 
 static void step_as_offline(GameState *instance, float time_step)
 {
-    //Input::read_input();
+    Platform::Input::read_input();
+
     for(int i = 0; i < instance->players.size; i++)
     {
-        Players::Player *player = instance->players[i];
-
-        Players::read_actions(player);
+        Player *player = instance->players[i];
+        read_player_actions(player);
     }
 
     // Update the in game level
@@ -153,6 +167,13 @@ static void step_as_offline(GameState *instance, float time_step)
     if(ImGui::Button("Switch to client")) switch_network_mode(instance, Network::GameMode::CLIENT);
     if(ImGui::Button("Switch to server")) switch_network_mode(instance, Network::GameMode::SERVER);
 
+    if(ImGui::Button("Add player"))
+    {
+        int new_id = Game::Players::add();
+
+        Levels::add_avatar(instance->playing_level, new_id);
+    }
+
     GameConsole::draw();
 
     ImGui::End();
@@ -167,8 +188,8 @@ static void step_as_client(GameState *instance, float time_step)
     Network::Client::send_input_state_to_server();
 
     Serialization::Stream *game_stream = Serialization::make_stream();
-    bool read = Network::Client::read_game_state(game_stream);
-    if(read)
+    Network::ReadResult result = Network::Client::read_game_state(game_stream);
+    if(result == Network::ReadResult::READY)
     {
         deserialize_game(instance, game_stream);
     }
@@ -255,6 +276,33 @@ static void do_one_step(GameState *instance, float time_step)
     }
 }
 
+static void shutdown_game(GameState *instance)
+{
+    switch(instance->network_mode)
+    {
+        case Network::GameMode::OFFLINE:
+        {
+            break;
+        }
+
+        case Network::GameMode::CLIENT:
+        {
+            Network::Client::disconnect();
+            break;
+        }
+
+        case Network::GameMode::SERVER:
+        {
+            Network::Server::disconnect();
+            break;
+        }
+    }
+
+    Graphics::ImGuiImplementation::shutdown();
+}
+
+
+
 void Game::start()
 {
     Platform::init();
@@ -266,14 +314,14 @@ void Game::start()
     init_game(&instance);
     init_imgui();
 
-    Log::log_info("Hello, sir! %d, %s", 42, "Bye!");
-
     seed_random(0);
 
     instance->last_loop_time = Platform::time_since_start();
     while(instance->running)
     {
         Platform::handle_os_events();
+
+        if(instance->running == false) break;
 
         double this_loop_time = Platform::time_since_start();
         double seconds_since_last_loop = this_loop_time - instance->last_loop_time;
@@ -317,6 +365,8 @@ void Game::start()
             // Wait for a bit
         }
     }
+
+    shutdown_game(instance);
 }
 
 void Game::stop()
@@ -324,7 +374,26 @@ void Game::stop()
     instance->running = false;
 }
 
-void Game::add_player()
+
+
+Game::PlayerID Game::Players::add()
 {
+    Player *new_player = (Player *)Platform::Memory::allocate(sizeof(Player));
+    Platform::Memory::memset(new_player->current_actions, 0, sizeof(bool) * (int)Game::Players::Action::NUM_ACTIONS);
+    instance->players.push_back(new_player);
+    return instance->players.size - 1;
 }
+
+void Game::Players::remove(PlayerID id)
+{
+    // TODO
+}
+
+bool Game::Players::action(PlayerID id, Action action)
+{
+    Player *player = instance->players[id];
+    int index = (int)action;
+    return player->current_actions[index];
+}
+
 

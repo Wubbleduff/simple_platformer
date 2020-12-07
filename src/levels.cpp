@@ -1,6 +1,7 @@
 
 #include "levels.h"
 #include "platform.h"
+#include "logging.h"
 #include "game_math.h"
 #include "algorithms.h"
 #include "data_structures.h"
@@ -104,7 +105,7 @@ struct Grid
 
 struct Avatar
 {
-    PlayerID player_id;
+    Game::PlayerID player_id;
 
     v2 position;
     v4 color;
@@ -176,31 +177,12 @@ static void reset_level(Levels::Level *level)
         level->grid.at(pos)->filled = true;
     }
 
-    /*
-    level->player.position = v2(0.0f, 4.0f);
-    level->player.grounded = false;
-
-    level->player.horizontal_velocity = 0.0f;
-    level->player.vertical_velocity = 0.0f;
-
-    level->player.run_strength = 256.0f;
-    level->player.friction_strength = 16.0f;
-    level->player.mass = 4.0f;
-    level->player.gravity = 9.81f;
-
-    level->player.full_extent = 1.0f;
-    level->player.color = v4(1.0f, 0.0f, 0.5f, 1.0f);
-    */
 }
 
-
-
-static void check_and_resolve_collisions(Levels::Level *level)
+static void check_and_resolve_collisions(Levels::Level *level, Avatar *avatar)
 {
-    /*
-    Player *player = &(level->player);
-    v2 player_bl = player->position - v2(1.0f, 1.0f) * player->full_extent * 0.5f;
-    v2 player_tr = player->position + v2(1.0f, 1.0f) * player->full_extent * 0.5f;
+    v2 avatar_bl = avatar->position - v2(1.0f, 1.0f) * avatar->full_extent * 0.5f;
+    v2 avatar_tr = avatar->position + v2(1.0f, 1.0f) * avatar->full_extent * 0.5f;
 
     DynamicArray<float> rights;
     DynamicArray<float> lefts;
@@ -222,7 +204,7 @@ static void check_and_resolve_collisions(Levels::Level *level)
 
                 v2 dir;
                 float depth;
-                bool collision = aabb(cell_bl, cell_tr, player_bl, player_tr, &dir, &depth);
+                bool collision = aabb(cell_bl, cell_tr, avatar_bl, avatar_tr, &dir, &depth);
                 if(collision)
                 {
                     bool blocked = false;
@@ -259,48 +241,43 @@ static void check_and_resolve_collisions(Levels::Level *level)
     resolution += v2( 0.0f,  1.0f) * max_up;
     resolution += v2( 0.0f, -1.0f) * max_down;
 
-    player->position += resolution;
+    avatar->position += resolution;
 
     if(length_squared(resolution) == 0.0f)
     {
-        player->grounded = false;
+        avatar->grounded = false;
     }
-    if(resolution.y > 0.0f && player->vertical_velocity < 0.0f)
+    if(resolution.y > 0.0f && avatar->vertical_velocity < 0.0f)
     {
-        player->grounded = true;
+        avatar->grounded = true;
     }
-    if(resolution.y < 0.0f && player->vertical_velocity > 0.0f)
+    if(resolution.y < 0.0f && avatar->vertical_velocity > 0.0f)
     {
-        player->vertical_velocity = 0.0f;
+        avatar->vertical_velocity = 0.0f;
     }
     if(abs(resolution.x) > 0.0f)
     {
-        player->horizontal_velocity = 0.0f;
+        avatar->horizontal_velocity = 0.0f;
     }
-    */
 }
 
-
-
-Levels::Level *Levels::create_level()
+static void init_avatar(Avatar *avatar, Game::PlayerID id)
 {
-    Level* level = (Level *)Platform::Memory::allocate(sizeof(Level));
+    avatar->player_id = id;
 
-    level->grid.init(256, 256);
+    avatar->position = v2(2.0f, 4.0f);
+    avatar->grounded = false;
 
-    reset_level(level);
+    avatar->horizontal_velocity = 0.0f;
+    avatar->vertical_velocity = 0.0f;
 
-    return level;
-}
+    avatar->run_strength = 256.0f;
+    avatar->friction_strength = 16.0f;
+    avatar->mass = 4.0f;
+    avatar->gravity = 9.81f;
 
-void add_avatar(PlayerID id)
-{
-    //game_state->avatars[id].create();
-}
-
-void remove_avatar(PlayerID id)
-{
-    //game_state->avatars.remove(id);
+    avatar->full_extent = 1.0f;
+    avatar->color = v4(1.0f, 0.0f, 0.5f, 1.0f);
 }
 
 static void step_avatar(Avatar *avatar, Levels::Level *level, float dt)
@@ -308,9 +285,9 @@ static void step_avatar(Avatar *avatar, Levels::Level *level, float dt)
     float horizontal_acceleration = 0.0f;
     float vertical_acceleration = 0.0f;
 
-    bool moving_right = Players::action(avatar->player_id, Players::Action::MOVE_RIGHT);
-    bool moving_left = Players::action(avatar->player_id, Players::Action::MOVE_LEFT);
-    bool jump = Players::action(avatar->player_id, Players::Action::JUMP);
+    bool moving_right = Game::Players::action(avatar->player_id, Game::Players::Action::MOVE_RIGHT);
+    bool moving_left = Game::Players::action(avatar->player_id, Game::Players::Action::MOVE_LEFT);
+    bool jump = Game::Players::action(avatar->player_id, Game::Players::Action::JUMP);
 
     if(moving_right)
     {
@@ -347,17 +324,63 @@ static void step_avatar(Avatar *avatar, Levels::Level *level, float dt)
 
 
 
-    check_and_resolve_collisions(level);
+    check_and_resolve_collisions(level, avatar);
+}
+
+static void draw_avatar(Avatar *avatar)
+{
+    Graphics::draw_quad(avatar->position, v2(1.0f, 1.0f) * avatar->full_extent, 0.0f, avatar->color);
+}
+
+
+
+Levels::Level *Levels::create_level()
+{
+    Level* level = (Level *)Platform::Memory::allocate(sizeof(Level));
+
+    level->avatars.init();
+
+    level->grid.init(256, 256);
+
+    reset_level(level);
+
+    return level;
+}
+
+void Levels::add_avatar(Level *level, Game::PlayerID id)
+{
+    Avatar *new_avatar = (Avatar *)Platform::Memory::allocate(sizeof(Avatar));
+    init_avatar(new_avatar, id);
+    level->avatars.push_back(new_avatar);
+}
+
+void Levels::remove_avatar(Level *level, Game::PlayerID id)
+{
+    Avatar *to_remove = nullptr;
+    int to_remove_index = -1;
+    for(int i = 0; i < level->avatars.size; i++)
+    {
+        if(level->avatars[i]->player_id == id)
+        {
+            to_remove = level->avatars[i];
+            to_remove_index = i;
+            break;
+        }
+    }
+    if(to_remove == nullptr) return;
+
+    Platform::Memory::free(to_remove);
+
+    level->avatars.remove_unordered(to_remove_index);
 }
 
 void Levels::step_level(Level *level, float dt)
 {
-    /*
-    for(Avatar &avatar : level->avatars)
+    for(int i = 0; i < level->avatars.size; i++)
     {
-        step_avatar(level, dt);
+        Avatar *avatar = level->avatars[i];
+        step_avatar(avatar, level, dt);
     }
-    */
 }
 
 void Levels::draw_level(Level *level)
@@ -366,13 +389,12 @@ void Levels::draw_level(Level *level)
     Graphics::set_camera_width(64.0f);
     Graphics::set_camera_position(v2() + camera_offset);
 
-    // Draw the player
-    /*
-    for(Avatar &avatar : level->avatars)
+    // Draw the players
+    for(int i = 0; i < level->avatars.size; i++)
     {
-        Graphics::draw_quad(player->position, v2(player->full_extent, player->full_extent), 0.0f, player->color);
+        Avatar *avatar = level->avatars[i];
+        draw_avatar(avatar);
     }
-    */
 
     // Draw grid terrain
     v2i tl = level->grid.top_left();

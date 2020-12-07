@@ -30,6 +30,8 @@ LogState *Log::instance = nullptr;
 
 static void log_message(LogState *instance, char *text, LogState::Level level)
 {
+    if(instance->output_file == NULL) return;
+
     fprintf(instance->output_file, text);
     fflush(instance->output_file);
 

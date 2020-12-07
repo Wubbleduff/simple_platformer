@@ -28,6 +28,7 @@ struct Graphics
         static void init();
         static void new_frame();
         static void end_frame();
+        static void shutdown();
     };
 };
 
