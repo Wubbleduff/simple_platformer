@@ -420,6 +420,7 @@ void Levels::draw_level(Level *level)
 void Levels::serialize_level(Serialization::Stream *stream, Level *level)
 {
     // Write the header
+    /*
     Serialization::write_stream(stream, level->grid.width);
     Serialization::write_stream(stream, level->grid.height);
     
@@ -441,14 +442,16 @@ void Levels::serialize_level(Serialization::Stream *stream, Level *level)
             }
         }
     }
+    */
 
-    //Serialization::write_stream(stream, level->player.position);
-    //Serialization::write_stream(stream, level->player.color);
+    Serialization::write_stream(stream, level->avatars[0]->position);
+    Serialization::write_stream(stream, level->avatars[0]->color);
 }
 
 void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
 {
     // Read the header
+    /*
     Serialization::read_stream(stream, &(level->grid.width));
     Serialization::read_stream(stream, &(level->grid.height));
     
@@ -465,9 +468,10 @@ void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
             level->grid.at(pos)->filled = (c == '1');
         }
     }
+    */
 
-    //Serialization::read_stream(stream, &(level->player.position));
-    //Serialization::read_stream(stream, &(level->player.color));
+    Serialization::read_stream(stream, &(level->avatars[0]->position));
+    Serialization::read_stream(stream, &(level->avatars[0]->color));
 }
 
 

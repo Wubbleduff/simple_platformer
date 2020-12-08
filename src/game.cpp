@@ -128,16 +128,32 @@ static void switch_network_mode(GameState *instance, Network::GameMode mode)
 {
     if(mode == Network::GameMode::OFFLINE)
     {
+        if(instance->network_mode == Network::GameMode::CLIENT)
+        {
+            Network::Client::disconnect();
+        }
+        if(instance->network_mode == Network::GameMode::SERVER)
+        {
+            Network::Server::disconnect();
+        }
         instance->network_mode = Network::GameMode::OFFLINE;
     }
 
     if(mode == Network::GameMode::CLIENT)
     {
+        if(instance->network_mode == Network::GameMode::SERVER)
+        {
+            Network::Server::disconnect();
+        }
         instance->network_mode = Network::GameMode::CLIENT;
     }
 
     if(mode == Network::GameMode::SERVER)
     {
+        if(instance->network_mode == Network::GameMode::CLIENT)
+        {
+            Network::Client::disconnect();
+        }
         instance->network_mode = Network::GameMode::SERVER;
         Network::Server::listen_for_client_connections(4242);
     }
@@ -191,6 +207,7 @@ static void step_as_client(GameState *instance, float time_step)
     Network::ReadResult result = Network::Client::read_game_state(game_stream);
     if(result == Network::ReadResult::READY)
     {
+        Serialization::reset_stream(game_stream);
         deserialize_game(instance, game_stream);
     }
     Serialization::free_stream(game_stream);
@@ -221,8 +238,14 @@ static void step_as_client(GameState *instance, float time_step)
 
 static void step_as_server(GameState *instance, float time_step)
 {
-    Network::Server::read_client_input_states();
-    //Input::read_input();
+    Platform::Input::read_input();
+
+    for(int i = 0; i < instance->players.size; i++)
+    {
+        Player *player = instance->players[i];
+        read_player_actions(player);
+    }
+    //Network::Server::read_client_input_states();
 
     // Update the in game level
     Levels::step_level(instance->playing_level, time_step);

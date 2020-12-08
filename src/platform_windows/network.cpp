@@ -54,6 +54,11 @@ static void set_blocking_mode(SOCKET socket, BlockingMode mode)
 {
     u_long code = (mode == BLOCKING) ? 0 : 1;
     int error = ioctlsocket(socket, FIONBIO, &code);
+    if(error == SOCKET_ERROR)
+    {
+        Log::log_error("Could not change socket blocking mode");
+        return;
+    }
 }
 
 struct Connection
@@ -112,16 +117,25 @@ struct Connection
         char *data = Serialization::stream_data(stream);
         int bytes = Serialization::stream_size(stream);
 
-        long int bytes_queued = send(tcp_socket, data, bytes, 0);
+        // TODO: Move this out
+        char *send_buffer = (char *)Platform::Memory::allocate(HEADER_SIZE + bytes);
+        Header header = { bytes };
+        *(Header *)send_buffer = header;
+        Platform::Memory::memcpy(send_buffer + HEADER_SIZE, data, bytes);
+
+        long int bytes_queued = send(tcp_socket, send_buffer, HEADER_SIZE + bytes, 0);
         if(bytes_queued == SOCKET_ERROR)
         {
             Log::log_error("Error sending data: %i\n", get_last_error());
         }
 
-        if(bytes_queued != bytes)
+        if(bytes_queued != HEADER_SIZE + bytes)
         {
-            Log::log_warning("Couldn't queue the requested number of bytes for sending. Requested: %i - Queued: %i", bytes, bytes_queued);
+            Log::log_warning("Couldn't queue the requested number of bytes for sending. Requested: %i - Queued: %i",
+                    HEADER_SIZE + bytes, bytes_queued);
         }
+
+        Platform::Memory::free(send_buffer);
     }
 
 
@@ -135,7 +149,7 @@ struct Connection
 
     void try_receive_data(int receive_up_to_bytes)
     {
-        char **receive_buffer_target = &(receive_buffer);
+        char **receive_buffer_target = &(receive_target);
         const char *receive_buffer_end = receive_buffer + receive_up_to_bytes;
 
         bool received_new_data = true;
@@ -170,7 +184,9 @@ struct Connection
             try_receive_data(HEADER_SIZE);
             if(!connected) return;
         }
-        else
+
+        // Can't be else statement on before because might be expecting header now
+        if(!expecting_header())
         {
             try_receive_data(HEADER_SIZE + buffer_header->content_size);
             if(!connected) return;
@@ -246,6 +262,9 @@ static Connection *make_connection()
     Platform::Memory::memset(new_connection->ip_address, 0, sizeof(new_connection->ip_address));
     new_connection->port = 0;
 
+    new_connection->receive_buffer = (char *)Platform::Memory::allocate(Connection::RECEIVE_BUFFER_SIZE);
+    new_connection->receive_target = new_connection->receive_buffer;
+
     return new_connection;
 }
 
@@ -285,9 +304,12 @@ void Network::init()
 // Client
 void Network::Client::disconnect()
 {
+    if(!instance->client.server_connection) return;
     if(!instance->client.server_connection->connected) return;
 
     destroy_connection(&(instance->client.server_connection));
+
+    Log::log_info("Client disconnected");
 }
 
 void Network::Client::connect_to_server(const char *ip_address, int port)
@@ -339,10 +361,13 @@ void Network::Client::connect_to_server(const char *ip_address, int port)
     strcpy(instance->client.server_connection->ip_address, ip_address);
     instance->client.server_connection->port = port;
     instance->client.server_connection->connected = true;
+
+    Log::log_info("Connected to server %s:%i", ip_address, port);
 }
 
 void Network::Client::send_input_state_to_server()
 {
+    /*
     Connection *server = instance->client.server_connection;
     if(server && server->connected)
     {
@@ -354,6 +379,7 @@ void Network::Client::send_input_state_to_server()
 
         Serialization::free_stream(stream);
     }
+    */
 }
 
 Network::ReadResult Network::Client::read_game_state(Serialization::Stream *stream)
@@ -370,6 +396,7 @@ Network::ReadResult Network::Client::read_game_state(Serialization::Stream *stre
     // Check if the connection was closed after the read
     if(!server->connected)
     {
+        Log::log_info("Server closed");
         destroy_connection(&(instance->client.server_connection));
         return Network::ReadResult::CLOSED;
     }
@@ -391,16 +418,17 @@ Network::ReadResult Network::Client::read_game_state(Serialization::Stream *stre
 // Server
 void Network::Server::disconnect()
 {
-    Connection *server = instance->client.server_connection;
-    if(!server || !server->connected) return;
-
     for(int i = 0; i < instance->server.client_connections.size; i++)
     {
-        Connection *client = instance->server.client_connections[i];
+        Log::log_info("Disconnecting client %i", i);
         destroy_connection(&(instance->server.client_connections[i]));
     }
 
     instance->server.client_connections.clear();
+
+    closesocket(instance->server.listening_socket);
+
+    Log::log_info("Server disconnected");
 }
 
 void Network::Server::listen_for_client_connections(int port)
@@ -413,20 +441,14 @@ void Network::Server::listen_for_client_connections(int port)
         return;
     }
 
-    unsigned long mode = 1; // 1 = Non-blocking, 0 = blocking
-    int error = ioctlsocket(listening_socket, FIONBIO, &mode);
-    if(error != 0)
-    {
-        Log::log_error("Couldn't make socket non-blocking: %i\n", get_last_error());
-        return;
-    }
+    set_blocking_mode(listening_socket, NONBLOCKING);
 
     sockaddr_in bound_address;
     bound_address.sin_family = AF_INET;
     bound_address.sin_addr.s_addr = INADDR_ANY;
     bound_address.sin_port = htons(port);
 
-    error = bind(listening_socket, (SOCKADDR *)(&bound_address), sizeof(bound_address));
+    int error = bind(listening_socket, (SOCKADDR *)(&bound_address), sizeof(bound_address));
     if(error == SOCKET_ERROR)
     {
         error = get_last_error();
@@ -470,9 +492,9 @@ void Network::Server::accept_client_connections()
 
         // Valid socket
         Connection *client_connection = make_connection();
+        client_connection->connected = true;
         client_connection->tcp_socket = incoming_socket;
         char string_buffer[16];
-        client_connection->connected = true;
         inet_ntop(AF_INET, &client_address, client_connection->ip_address, sizeof(client_connection->ip_address));
         client_connection->port = (int)client_address.sin_port;
         instance->server.client_connections.push_back(client_connection);
@@ -491,8 +513,6 @@ Network::ReadResult Network::Server::read_client_input_states()
     for(int i = 0; i < instance->server.client_connections.size; i++)
     {
         Connection *client = instance->server.client_connections[i];
-
-        if(!client->connected) continue;
 
         // Update the connection data (read into buffer) and state (closed or still open)
         client->update_receive_state();
@@ -538,9 +558,8 @@ void Network::Server::broadcast_game(Serialization::Stream *game_stream)
     for(int i = 0; i < instance->server.client_connections.size; i++)
     {
         Connection *client_connection = instance->server.client_connections[i];
-        if(!client_connection->connected) continue;
 
-        //client_connection->send_stream(game_stream);
+        client_connection->send_stream(game_stream);
     }
 }
 

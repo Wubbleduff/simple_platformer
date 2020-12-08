@@ -49,6 +49,10 @@ void Log::init()
     instance = (LogState *)Platform::Memory::allocate(sizeof(LogState));
 
     instance->output_file = fopen("output/game_log.txt", "w");
+    if(instance->output_file == NULL)
+    {
+        instance->output_file = fopen("output/game_log_2.txt", "w");
+    }
 }
 
 void Log::log_info_fn(const char *file, int line, const char *format, ...)
