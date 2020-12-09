@@ -444,8 +444,8 @@ void Levels::serialize_level(Serialization::Stream *stream, Level *level)
     }
     */
 
-    Serialization::write_stream(stream, level->avatars[0]->position);
-    Serialization::write_stream(stream, level->avatars[0]->color);
+    stream->write(level->avatars[0]->position);
+    stream->write(level->avatars[0]->color);
 }
 
 void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
@@ -470,8 +470,8 @@ void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
     }
     */
 
-    Serialization::read_stream(stream, &(level->avatars[0]->position));
-    Serialization::read_stream(stream, &(level->avatars[0]->color));
+    stream->read(&(level->avatars[0]->position));
+    stream->read(&(level->avatars[0]->color));
 }
 
 

@@ -3,34 +3,38 @@
 
 #include "game_math.h"
 
+
 struct Serialization
 {
-    struct Stream;
+    struct Stream
+    {
+        int capacity;
+        int stream_size;
+        char *stream_data;
+        int current_offset;
+
+        char *data();
+        int size();
+        bool at_end();
+        void clear();
+        void reset();
+        void write(char item);
+        void write(int item);
+        void write(float item);
+        void write(GameMath::v2 item);
+        void write(GameMath::v3 item);
+        void write(GameMath::v4 item);
+        void write_array(int num, char *array);
+        void read(char *item);
+        void read(int *item);
+        void read(float *item);
+        void read(GameMath::v2 *item);
+        void read(GameMath::v3 *item);
+        void read(GameMath::v4 *item);
+        void read_array(int num, char *array);
+    };
 
     static Stream *make_stream(int capacity = 1);
     static void free_stream(Stream *stream);
-
-    static char *stream_data(Stream *stream);
-    static int stream_size(Stream *stream);
-
-    static void clear_stream(Stream *stream);
-    static void reset_stream(Stream *stream);
-
-    static void write_stream(Stream *stream, char item);
-    static void write_stream(Stream *stream, int item);
-    static void write_stream(Stream *stream, float item);
-    static void write_stream(Stream *stream, GameMath::v2 item);
-    static void write_stream(Stream *stream, GameMath::v3 item);
-    static void write_stream(Stream *stream, GameMath::v4 item);
-    static void write_stream_array(Stream *stream, int num, char *array);
-
-    static void read_stream(Stream *stream, char *item);
-    static void read_stream(Stream *stream, int *item);
-    static void read_stream(Stream *stream, float *item);
-    static void read_stream(Stream *stream, GameMath::v2 *item);
-    static void read_stream(Stream *stream, GameMath::v3 *item);
-    static void read_stream(Stream *stream, GameMath::v4 *item);
-    static void read_stream_array(Stream *stream, int num, char *array);
-
 };
 

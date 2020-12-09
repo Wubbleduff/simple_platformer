@@ -18,6 +18,14 @@ class DynamicArray
             data = nullptr;
         }
 
+        void uninit()
+        {
+            Platform::Memory::free(data);
+            capacity = 1;
+            size = 0;
+            data = nullptr;
+        }
+
         void push_back(T item)
         {
             maybe_grow(size + 1);
@@ -29,6 +37,16 @@ class DynamicArray
             T item = data[size - 1];
             size--;
             return item;
+        }
+
+        T front()
+        {
+            return data[0];
+        }
+
+        T back()
+        {
+            return data[size - 1];
         }
 
         void resize(int items)
