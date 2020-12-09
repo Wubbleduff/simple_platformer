@@ -159,6 +159,7 @@ void Network::disconnect(Network::Connection **connection)
         Log::log_error("Could not send shutdown signal");
     }
 
+    // TODO: Have a timeout period
     static char buf[1024];
     while(true)
     {
@@ -170,6 +171,8 @@ void Network::disconnect(Network::Connection **connection)
     }
 
     closesocket((*connection)->tcp_socket);
+
+    Log::log_info("Disconnected from %s:%i", (*connection)->ip_address, (*connection)->port);
 
     (*connection)->recorded_frames.uninit();
     Platform::Memory::free((*connection)->receive_buffer);
@@ -220,8 +223,11 @@ void Network::stop_listening_for_client_connections()
     instance->listening_socket = INVALID_SOCKET;
 }
 
-void Network::accept_client_connections(DynamicArray<Connection *> *connections)
+DynamicArray<Network::Connection *> Network::accept_client_connections()
 {
+    DynamicArray<Connection *> connections;
+    connections.init();
+
     int return_code = 0;
     do
     {
@@ -254,13 +260,15 @@ void Network::accept_client_connections(DynamicArray<Connection *> *connections)
         Connection *client_connection =
             Network::Connection::allocate_and_init_connection(incoming_socket, ip_address_string, port_number);
 
-        connections->push_back(client_connection);
+        connections.push_back(client_connection);
 
         time_t now;
         time(&now);
         Log::log_info("%s: Client connected on port %i", ctime(&now), client_connection->port);
 
     } while(return_code != CODE_WOULD_BLOCK);
+
+    return connections;
 }
 
 void Network::Connection::send_stream(Serialization::Stream *stream)

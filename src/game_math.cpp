@@ -641,5 +641,14 @@ namespace GameMath
         return lerp(min, max, random_01());
     }
 
+    v4 random_color()
+    {
+        float hue = random_range(0.0f, 360.0f);
+        float sat = 1.0f;
+        float value = 1.0f;
+        v3 hsv = { hue, sat, value };
+        return v4( hsv_to_rgb(hsv), 1.0f);
+    }
+
 
 }

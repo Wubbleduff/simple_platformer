@@ -42,7 +42,7 @@ void Serialization::Stream::clear()
     current_offset = 0;
 }
 
-void Serialization::Stream::reset()
+void Serialization::Stream::move_to_beginning()
 {
     current_offset = 0;
 }

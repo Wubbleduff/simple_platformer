@@ -300,5 +300,6 @@ namespace GameMath
     float random_01();
     int random_range(int min, int max);
     float random_range(float min, float max);
+    v4 random_color();
 
 } // namespace GameMath

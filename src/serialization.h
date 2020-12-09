@@ -16,8 +16,8 @@ struct Serialization
         char *data();
         int size();
         bool at_end();
+        void move_to_beginning();
         void clear();
-        void reset();
         void write(char item);
         void write(int item);
         void write(float item);

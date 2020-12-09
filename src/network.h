@@ -58,11 +58,11 @@ struct Network
 
     static void init();
 
-    static struct Connection *connect(const char *ip_address, int port);
-    static void disconnect(struct Connection **connection);
+    static Connection *connect(const char *ip_address, int port);
+    static void disconnect(Connection **connection);
 
     static void listen_for_client_connections(int port);
     static void stop_listening_for_client_connections();
-    static void accept_client_connections(DynamicArray<Connection *> *connections);
+    static DynamicArray<Connection *> accept_client_connections();
 };
 

@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include "network.h"
+
 struct Game
 {
     static struct GameState *instance;
@@ -8,7 +10,11 @@ struct Game
     static void start();
     static void stop();
 
-    typedef int PlayerID;
+    struct PlayerID
+    {
+        int id;
+        bool remote;
+    };
     struct Players
     {
         enum class Action
@@ -21,6 +27,7 @@ struct Game
         };
 
         static PlayerID add();
+        static PlayerID add_remote(Network::Connection *Connection);
         static void remove(PlayerID id);
         static bool action(PlayerID id, Action action);
     };

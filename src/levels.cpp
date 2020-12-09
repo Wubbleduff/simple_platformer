@@ -277,7 +277,7 @@ static void init_avatar(Avatar *avatar, Game::PlayerID id)
     avatar->gravity = 9.81f;
 
     avatar->full_extent = 1.0f;
-    avatar->color = v4(1.0f, 0.0f, 0.5f, 1.0f);
+    avatar->color = random_color();
 }
 
 static void step_avatar(Avatar *avatar, Levels::Level *level, float dt)
@@ -356,6 +356,7 @@ void Levels::add_avatar(Level *level, Game::PlayerID id)
 
 void Levels::remove_avatar(Level *level, Game::PlayerID id)
 {
+    /*
     Avatar *to_remove = nullptr;
     int to_remove_index = -1;
     for(int i = 0; i < level->avatars.size; i++)
@@ -372,6 +373,7 @@ void Levels::remove_avatar(Level *level, Game::PlayerID id)
     Platform::Memory::free(to_remove);
 
     level->avatars.remove_unordered(to_remove_index);
+    */
 }
 
 void Levels::step_level(Level *level, float dt)
@@ -444,8 +446,13 @@ void Levels::serialize_level(Serialization::Stream *stream, Level *level)
     }
     */
 
-    stream->write(level->avatars[0]->position);
-    stream->write(level->avatars[0]->color);
+    stream->write(level->avatars.size);
+    for(int i = 0; i < level->avatars.size; i++)
+    {
+        stream->write(level->avatars[i]->position);
+        stream->write(level->avatars[i]->color);
+    }
+    
 }
 
 void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
@@ -470,8 +477,19 @@ void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
     }
     */
 
-    stream->read(&(level->avatars[0]->position));
-    stream->read(&(level->avatars[0]->color));
+    int num_avatars;
+    stream->read(&num_avatars);
+    while(level->avatars.size < num_avatars)
+    {
+        // TODO: Match server players to avatars
+        Levels::add_avatar(level, {-1, false});
+    }
+    for(int i = 0; i < num_avatars; i++)
+    {
+        stream->read(&(level->avatars[i]->position));
+        stream->read(&(level->avatars[i]->color));
+    }
+    
 }
 
 
