@@ -5,16 +5,16 @@
 
 struct Game
 {
+    struct PlayerID
+    {
+        int id;
+    };
+
     static struct GameState *instance;
 
     static void start();
     static void stop();
 
-    struct PlayerID
-    {
-        int id;
-        bool remote;
-    };
     struct Players
     {
         enum class Action
@@ -31,7 +31,6 @@ struct Game
         static void remove(PlayerID id);
         static bool action(PlayerID id, Action action);
     };
-
 };
 
 

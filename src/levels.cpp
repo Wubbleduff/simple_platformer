@@ -482,7 +482,7 @@ void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
     while(level->avatars.size < num_avatars)
     {
         // TODO: Match server players to avatars
-        Levels::add_avatar(level, {-1, false});
+        Levels::add_avatar(level, { -1 });
     }
     for(int i = 0; i < num_avatars; i++)
     {
