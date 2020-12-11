@@ -170,7 +170,7 @@ static void create_gl_context(GraphicsState *instance)
 
 static Mesh *make_mesh(int num_vertices, Vertex *vertices, int num_indices, int *indices, GLuint primitive_type = GL_TRIANGLES)
 {
-    Mesh *mesh = (Mesh *)Platform::Memory::allocate(sizeof(Mesh));
+    Mesh *mesh = new Mesh();
 
     mesh->num_indices = num_indices;
     mesh->primitive_type = primitive_type;
@@ -203,7 +203,7 @@ static Mesh *make_mesh(int num_vertices, Vertex *vertices, int num_indices, int 
 
 static Mesh *make_uv_mesh(int num_vertices, VertexUv *vertices, int num_indices, int *indices, GLuint primitive_type = GL_TRIANGLES)
 {
-    Mesh *mesh = (Mesh *)Platform::Memory::allocate(sizeof(Mesh));
+    Mesh *mesh = new Mesh();
 
     mesh->num_indices = num_indices;
     mesh->primitive_type = primitive_type;
@@ -265,7 +265,7 @@ static void use_mesh(Mesh *mesh)
 
 static Texture *make_texture_from_bitmap(int width, int height, char *bitmap)
 {
-    Texture *texture = (Texture *)Platform::Memory::allocate(sizeof(Texture));
+    Texture *texture = new Texture();
 
     glGenTextures(1, &texture->handle);
     glBindTexture(GL_TEXTURE_2D, texture->handle);
@@ -372,9 +372,9 @@ void Graphics::draw_line(v2 a, v2 b, v4 color)
 void Graphics::draw_triangles(int num_vertices, v2 *vertices, int num_triples, v2 **triples, v4 color)
 {
     // TODO: Fix this to only be 1 allocation on initialize
-    Vertex *my_vertices = (Vertex *)Platform::Memory::allocate(sizeof(Vertex) * num_vertices);
+    Vertex *my_vertices = new Vertex[num_vertices]();
     int num_indices = num_triples * 3;
-    int *indices = (int *)Platform::Memory::allocate(sizeof(int) * num_indices);
+    int *indices = new int[num_indices]();
 
     //assert(num_vertices == num_triples + 2);
 
@@ -410,8 +410,8 @@ void Graphics::draw_triangles(int num_vertices, v2 *vertices, int num_triples, v
     check_gl_errors("draw");
 
     // SEE ABOVE
-    Platform::Memory::free(my_vertices);
-    Platform::Memory::free(indices);
+    delete[] my_vertices;
+    delete[] indices;
 }
 
 v2 Graphics::ndc_point_to_world(v2 ndc)
@@ -438,14 +438,14 @@ void Graphics::set_camera_width(float width)
 
 void Graphics::init()
 {
-    instance = (GraphicsState *)Platform::Memory::allocate(sizeof(GraphicsState));
+    instance = new GraphicsState();
 
     create_gl_context(instance);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    instance->camera = (Camera *)Platform::Memory::allocate(sizeof(Camera));
+    instance->camera = new Camera();
     instance->camera->position = v2();
     instance->camera->width = 10.0f;
     instance->screen_aspect_ratio = Platform::Window::aspect_ratio();
@@ -469,8 +469,8 @@ void Graphics::init()
         instance->line_mesh = make_mesh(2, nullptr, 2, nullptr);
         instance->triangles_mesh = make_mesh(MAX_TRIANGLES, nullptr, MAX_TRIANGLES * 3, nullptr);
 
-        Vertex *circle_vs = (Vertex *)Platform::Memory::allocate(sizeof(Vertex) * CIRCLE_MESH_RESOLUTION);
-        int *circle_is = (int *)Platform::Memory::allocate(sizeof(int) * CIRCLE_MESH_RESOLUTION);
+        Vertex *circle_vs = new Vertex[CIRCLE_MESH_RESOLUTION]();
+        int *circle_is = new int[CIRCLE_MESH_RESOLUTION]();
         for(int i = 0; i < CIRCLE_MESH_RESOLUTION; i++)
         {
             float theta = remap(i, 0.0f, CIRCLE_MESH_RESOLUTION - 1.0f, 0.0f, 2.0f * PI);
@@ -478,8 +478,8 @@ void Graphics::init()
         }
         for(int i = 0; i < CIRCLE_MESH_RESOLUTION; i++) circle_is[i] = i;
         instance->circle_mesh = make_mesh(CIRCLE_MESH_RESOLUTION, circle_vs, CIRCLE_MESH_RESOLUTION, circle_is, GL_LINE_STRIP);
-        free(circle_vs);
-        free(circle_is);
+        delete[] circle_vs;
+        delete[] circle_is;
 
         // Make shader
         instance->quad_shader = make_shader("assets/shaders/quad.shader");

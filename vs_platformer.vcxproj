@@ -37,7 +37,6 @@
     <ClCompile Include="src\platform_windows\network.cpp" />
     <ClCompile Include="src\platform_windows\platform.cpp" />
     <ClCompile Include="src\platform_windows\shader.cpp" />
-    <ClCompile Include="src\player.cpp" />
     <ClCompile Include="src\serialization.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -52,7 +51,6 @@
     <ClInclude Include="src\network.h" />
     <ClInclude Include="src\platform.h" />
     <ClInclude Include="src\platform_windows\platform_windows.h" />
-    <ClInclude Include="src\player.h" />
     <ClInclude Include="src\serialization.h" />
     <ClInclude Include="src\shader.h" />
   </ItemGroup>

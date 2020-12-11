@@ -4,6 +4,8 @@
 #include "serialization.h"
 #include "data_structures.h"
 
+#include <vector>
+
 struct Network
 {
     static struct NetworkState *instance;
@@ -41,7 +43,7 @@ struct Network
         };
         char *receive_target;
         static const int HEADER_SIZE = sizeof(Header);
-        DynamicArray<char *> recorded_frames;
+        std::vector<char *> recorded_frames;
 
         bool expecting_header();
         bool data_frame_complete();
@@ -63,6 +65,6 @@ struct Network
 
     static void listen_for_client_connections(int port);
     static void stop_listening_for_client_connections();
-    static DynamicArray<Connection *> accept_client_connections();
+    static std::vector<Connection *> accept_client_connections();
 };
 

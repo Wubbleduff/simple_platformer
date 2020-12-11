@@ -88,7 +88,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 
 void Platform::init()
 {
-    instance = (PlatformState *)Platform::Memory::allocate(sizeof(PlatformState));
+    instance = new PlatformState();
     Platform::Memory::memset(instance, 0, sizeof(PlatformState));
 
     QueryPerformanceCounter(&instance->start_time_counter);
@@ -271,8 +271,14 @@ void Platform::Window::mouse_screen_position(int *x, int *y)
     *y = window_client_pos.y;
 }
 
+template<typename T>
+static T *allocx(int num)
+{
+    T *array = new T[num];
+    array[0] = T();
+}
 
-
+/*
 void *Platform::Memory::allocate(int bytes)
 {
     //return ::malloc(bytes);
@@ -283,6 +289,7 @@ void Platform::Memory::free(void *data)
 {
     delete [] data;
 }
+*/
 
 void Platform::Memory::memset(void *buffer, int value, int bytes)
 {
@@ -314,11 +321,11 @@ static void ensure_directory_exists(const char *path)
 {
     int path_length = strlen(path);
 
-    char *path_copy = (char *)Platform::Memory::allocate(path_length + 1);
+    char *path_copy = new char[path_length + 1]();
     strcpy(path_copy, path);
 
     int stack_count = 0;
-    char **dirs_stack = (char **)Platform::Memory::allocate(path_length * sizeof(char *));
+    char **dirs_stack = new char *[path_length]();
 
     char *start = path_copy;
     char *end = start + path_length;
@@ -352,8 +359,8 @@ static void ensure_directory_exists(const char *path)
         *dir_path_end = '/';
     }
 
-    Platform::Memory::free(dirs_stack);
-    Platform::Memory::free(path_copy);
+    delete[] dirs_stack;
+    delete[] path_copy;
 }
 
 Platform::File *Platform::FileSystem::open(const char *path, FileMode mode)
@@ -361,7 +368,7 @@ Platform::File *Platform::FileSystem::open(const char *path, FileMode mode)
 
     ensure_directory_exists(path);
 
-    Platform::File *file = (Platform::File *)Platform::Memory::allocate(sizeof(File));
+    Platform::File *file = new File();
     char mode_string[8] = {};
     switch(mode)
     {
@@ -389,7 +396,7 @@ Platform::File *Platform::FileSystem::open(const char *path, FileMode mode)
 void Platform::FileSystem::close(Platform::File *file)
 {
     fclose(file->file);
-    Platform::Memory::free(file);
+    delete file;
 }
 
 void Platform::FileSystem::read(File *file, void *buffer, int bytes)
@@ -419,7 +426,7 @@ char *Platform::FileSystem::read_file_into_string(const char *path)
     int size = ftell(file);
     fseek(file, 0L, SEEK_SET);
 
-    char *buffer = (char *)Platform::Memory::allocate(size + 1);
+    char *buffer = new char[size + 1]();
 
     fread(buffer, size, 1, file);
 

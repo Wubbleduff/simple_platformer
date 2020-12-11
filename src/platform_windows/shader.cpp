@@ -6,8 +6,8 @@
 #include "GL/glew.h"
 #include "GL/wglew.h"
 #include "game_math.h"
-#include <stdio.h>
-#include <stdlib.h>
+//#include <stdio.h>
+//#include <stdlib.h>
 #include <assert.h>
 
 
@@ -133,7 +133,7 @@ static void read_shader_file(const char *path, char **memory, char **vert_source
 
 Shader *make_shader(const char *shader_path)
 {
-    Shader *result = (Shader *)Platform::Memory::allocate(sizeof(Shader));
+    Shader *result = new Shader();
 
     int  success;
     char info_log[512];

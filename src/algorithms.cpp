@@ -32,7 +32,7 @@ static int compare_vertex_and_angle(const void *v_a, const void *v_b)
     VertexAndAngle *b = (VertexAndAngle *)v_b;
     return (a->angle < b->angle) ? -1 : 1;
 }
-void find_convex_hull(int num_vertices, v2 *vertices, int *num_hull_lines, v2 *(hull[]))
+void find_convex_hull(int num_vertices, v2 *vertices, int *num_hull_lines, v2 **hull)
 {
     // Find the lowest point
     v2 *lowest_point = &(vertices[0]);
@@ -50,7 +50,7 @@ void find_convex_hull(int num_vertices, v2 *vertices, int *num_hull_lines, v2 *(
     }
 
     // Sort points by the angle between it and the lowest point and the x axis
-    VertexAndAngle *sorted_vertices = (VertexAndAngle *)Platform::Memory::allocate(sizeof(VertexAndAngle) * num_vertices);
+    VertexAndAngle *sorted_vertices = new VertexAndAngle[num_vertices]();
     for(int i = 0; i < num_vertices; i++)
     {
         float angle;

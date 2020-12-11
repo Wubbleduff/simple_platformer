@@ -46,7 +46,7 @@ static void log_message(LogState *instance, char *text, LogState::Level level)
 
 void Log::init()
 {
-    instance = (LogState *)Platform::Memory::allocate(sizeof(LogState));
+    instance = new LogState();
 
     instance->output_file = fopen("output/game_log.txt", "w");
     if(instance->output_file == NULL)
@@ -66,7 +66,7 @@ void Log::log_info_fn(const char *file, int line, const char *format, ...)
     int format1_size = snprintf(nullptr, 0, format1, file, line);
     int format2_size = vsnprintf(nullptr, 0, format2, args) + 1;
 
-    char *text_memory = (char *)Platform::Memory::allocate(format1_size + format2_size + 1);
+    char *text_memory = new char[format1_size + format2_size + 1]();
 
     snprintf(text_memory, format1_size + 1, format1, file, line);
     vsnprintf(text_memory + format1_size, format2_size + 1, format2, args);
@@ -76,6 +76,8 @@ void Log::log_info_fn(const char *file, int line, const char *format, ...)
     va_end(args);
 
     log_message(instance, text_memory, LogState::INFO);
+
+    delete[] text_memory;
 }
 
 void Log::log_warning_fn(const char *file, int line, const char *format, ...)
@@ -89,7 +91,7 @@ void Log::log_warning_fn(const char *file, int line, const char *format, ...)
     int format1_size = snprintf(nullptr, 0, format1, file, line);
     int format2_size = vsnprintf(nullptr, 0, format2, args) + 1;
 
-    char *text_memory = (char *)Platform::Memory::allocate(format1_size + format2_size + 1);
+    char *text_memory = new char[format1_size + format2_size + 1]();
 
     snprintf(text_memory, format1_size + 1, format1, file, line);
     vsnprintf(text_memory + format1_size, format2_size + 1, format2, args);
@@ -99,6 +101,8 @@ void Log::log_warning_fn(const char *file, int line, const char *format, ...)
     va_end(args);
 
     log_message(instance, text_memory, LogState::WARNING);
+
+    delete[] text_memory;
 }
 
 void Log::log_error_fn(const char *file, int line, const char *format, ...)
@@ -112,7 +116,7 @@ void Log::log_error_fn(const char *file, int line, const char *format, ...)
     int format1_size = snprintf(nullptr, 0, format1, file, line);
     int format2_size = vsnprintf(nullptr, 0, format2, args) + 1;
 
-    char *text_memory = (char *)Platform::Memory::allocate(format1_size + format2_size + 1);
+    char *text_memory = new char[format1_size + format2_size + 1]();
 
     snprintf(text_memory, format1_size + 1, format1, file, line);
     vsnprintf(text_memory + format1_size, format2_size + 1, format2, args);
@@ -122,4 +126,6 @@ void Log::log_error_fn(const char *file, int line, const char *format, ...)
     va_end(args);
 
     log_message(instance, text_memory, LogState::ERROR);
+
+    delete[] text_memory;
 }

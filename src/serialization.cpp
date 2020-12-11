@@ -7,17 +7,18 @@
 
 Serialization::Stream *Serialization::make_stream(int capacity)
 {
-    Stream *stream = (Stream *)Platform::Memory::allocate(sizeof(Stream));
+    Stream *stream = new Stream();
     stream->capacity = capacity;
     stream->stream_size = 0;
-    stream->stream_data = (char *)Platform::Memory::allocate(capacity);
+    stream->stream_data = new char[capacity]();
     stream->current_offset = 0;
     return stream;
 }
 
 void Serialization::free_stream(Stream *stream)
 {
-    Platform::Memory::free(stream);
+    delete[] stream->stream_data;
+    delete stream;
 }
 
 char *Serialization::Stream::data()
@@ -62,13 +63,13 @@ static void maybe_grow_stream(Serialization::Stream *stream, int bytes)
     }
 
     char *old = stream->stream_data;
-    stream->stream_data = (char *)Platform::Memory::allocate(new_capacity);
+    stream->stream_data = new char[new_capacity]();
 
     stream->capacity = new_capacity;
 
     Platform::Memory::memcpy(stream->stream_data, old, stream->stream_size);
 
-    Platform::Memory::free(old);
+    delete[] old;
 }
 
 template<typename T>

@@ -1,4 +1,4 @@
-
+  
 #pragma once
 
 #include "game_math.h"
@@ -25,8 +25,9 @@ struct Platform
     // Memory management
     struct Memory
     {
-        static void *allocate(int bytes);
-        static void free(void *data);
+        // Using new and delete (12/10/2020)
+        //static void *allocate(int bytes);
+        //static void free(void *data);
         static void memset(void *buffer, int value, int bytes);
         static void memcpy(void *dest, const void *src, int bytes);
     };

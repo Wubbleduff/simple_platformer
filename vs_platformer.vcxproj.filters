@@ -55,9 +55,6 @@
     <ClCompile Include="src\logging.cpp">
       <Filter>src</Filter>
     </ClCompile>
-    <ClCompile Include="src\player.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
     <ClCompile Include="src\serialization.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -106,9 +103,6 @@
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\platform.h">
-      <Filter>src</Filter>
-    </ClInclude>
-    <ClInclude Include="src\player.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\serialization.h">

@@ -4,7 +4,7 @@
 #include "platform.h"
 #include "data_structures.h"
 
-
+#include <vector>
 #include <WinSock2.h> // Networking API
 #include <Ws2tcpip.h> // InetPton
 #include <time.h>
@@ -91,7 +91,7 @@ static void cleanup_winsock()
 
 void Network::init()
 {
-    instance = (NetworkState *)Platform::Memory::allocate(sizeof(NetworkState));
+    instance = new NetworkState();
 
     init_winsock();
 
@@ -174,9 +174,9 @@ void Network::disconnect(Network::Connection **connection)
 
     Log::log_info("Disconnected from %s:%i", (*connection)->ip_address, (*connection)->port);
 
-    (*connection)->recorded_frames.uninit();
-    Platform::Memory::free((*connection)->receive_buffer);
-    Platform::Memory::free(*connection);
+    //delete (*connection)->recorded_frames;
+    delete[] (*connection)->receive_buffer;
+    delete *connection;
     *connection = nullptr;
 }
 
@@ -223,10 +223,9 @@ void Network::stop_listening_for_client_connections()
     instance->listening_socket = INVALID_SOCKET;
 }
 
-DynamicArray<Network::Connection *> Network::accept_client_connections()
+std::vector<Network::Connection *> Network::accept_client_connections()
 {
-    DynamicArray<Connection *> connections;
-    connections.init();
+    std::vector<Connection *> connections;
 
     int return_code = 0;
     do
@@ -278,7 +277,7 @@ void Network::Connection::send_stream(Serialization::Stream *stream)
     int bytes = stream->size();
 
     // TODO: Move this out
-    char *send_buffer = (char *)Platform::Memory::allocate(HEADER_SIZE + bytes);
+    char *send_buffer = new char[HEADER_SIZE + bytes]();
     Header header = { bytes };
     *(Header *)send_buffer = header;
     Platform::Memory::memcpy(send_buffer + HEADER_SIZE, stream_data, bytes);
@@ -295,7 +294,7 @@ void Network::Connection::send_stream(Serialization::Stream *stream)
                 HEADER_SIZE + bytes, bytes_queued);
     }
 
-    Platform::Memory::free(send_buffer);
+    delete[] send_buffer;
 }
 
 Network::ReadResult Network::Connection::read_into_stream(Serialization::Stream *stream)
@@ -350,7 +349,7 @@ void Network::Connection::add_data_frame(const char *frame)
 {
     const Header *frame_header = (const Header *)frame;
     int new_frame_bytes = HEADER_SIZE + frame_header->content_size;
-    char *new_frame = (char *)Platform::Memory::allocate(new_frame_bytes);
+    char *new_frame = new char[new_frame_bytes]();
     Platform::Memory::memcpy(new_frame, frame, new_frame_bytes);
     recorded_frames.push_back(new_frame);
 }
@@ -404,7 +403,7 @@ void Network::Connection::update_receive_state()
 
 bool Network::Connection::ready_to_read()
 {
-    return (recorded_frames.size > 0);
+    return (recorded_frames.size() > 0);
 }
 
 void Network::Connection::read_last_frame_into_stream(Serialization::Stream *stream)
@@ -417,24 +416,23 @@ void Network::Connection::read_last_frame_into_stream(Serialization::Stream *str
 
     stream->write_array(content_bytes, content);
 
-    Platform::Memory::free(frame);
+    delete[] frame;
     recorded_frames.pop_back();
 
     // Drop all previous frames for now...
-    for(int i = 0; i < recorded_frames.size; i++)
+    for(int i = 0; i < recorded_frames.size(); i++)
     {
-        Platform::Memory::free(recorded_frames[i]);
+        delete[] recorded_frames[i];
     }
     recorded_frames.clear();
 }
 
 Network::Connection *Network::Connection::allocate_and_init_connection(unsigned int in_socket, const char *ip_address, int port)
 {
-    Network::Connection *new_connection = (Network::Connection *)Platform::Memory::allocate(sizeof(Network::Connection));
+    Network::Connection *new_connection = new Network::Connection();
 
-    new_connection->receive_buffer = (char *)Platform::Memory::allocate(Network::Connection::RECEIVE_BUFFER_SIZE);
+    new_connection->receive_buffer = new char[Network::Connection::RECEIVE_BUFFER_SIZE]();
     new_connection->receive_target = new_connection->receive_buffer;
-    new_connection->recorded_frames.init();
 
     new_connection->tcp_socket = in_socket;
     strcpy(new_connection->ip_address, ip_address);

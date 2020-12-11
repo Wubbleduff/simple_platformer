@@ -9,6 +9,7 @@
 #include "serialization.h"
 
 //#include "imgui.h"
+#include <algorithm>
 
 
 
@@ -50,7 +51,7 @@ struct Grid
     {
         width = w;
         height = h;
-        cells = (Cell *)Platform::Memory::allocate(sizeof(Cell) * w * h);
+        cells = new Cell[w * h];
     }
 
     void clear()
@@ -128,7 +129,7 @@ struct Levels::Level
 {
     Grid grid;
 
-    DynamicArray<Avatar *> avatars;
+    std::vector<Avatar *> avatars;
 };
 
 
@@ -184,10 +185,10 @@ static void check_and_resolve_collisions(Levels::Level *level, Avatar *avatar)
     v2 avatar_bl = avatar->position - v2(1.0f, 1.0f) * avatar->full_extent * 0.5f;
     v2 avatar_tr = avatar->position + v2(1.0f, 1.0f) * avatar->full_extent * 0.5f;
 
-    DynamicArray<float> rights;
-    DynamicArray<float> lefts;
-    DynamicArray<float> ups;
-    DynamicArray<float> downs;
+    std::vector<float> rights;
+    std::vector<float> lefts;
+    std::vector<float> ups;
+    std::vector<float> downs;
 
     v2i tl = level->grid.top_left();
     v2i br = level->grid.bottom_right();
@@ -232,10 +233,10 @@ static void check_and_resolve_collisions(Levels::Level *level, Avatar *avatar)
     float max_left = 0.0f;
     float max_up = 0.0f;
     float max_down = 0.0f;
-    for(int i = 0; i < rights.size; i++) { max_right = max(rights[i], max_right); }
-    for(int i = 0; i < lefts.size; i++)  { max_left  = max(lefts[i], max_left); }
-    for(int i = 0; i < ups.size; i++)    { max_up    = max(ups[i], max_up); }
-    for(int i = 0; i < downs.size; i++)  { max_down  = max(downs[i], max_down); }
+    for(int i = 0; i < rights.size(); i++) { max_right = max(rights[i], max_right); }
+    for(int i = 0; i < lefts.size(); i++)  { max_left  = max(lefts[i], max_left); }
+    for(int i = 0; i < ups.size(); i++)    { max_up    = max(ups[i], max_up); }
+    for(int i = 0; i < downs.size(); i++)  { max_down  = max(downs[i], max_down); }
     resolution += v2( 1.0f,  0.0f) * max_right;
     resolution += v2(-1.0f,  0.0f) * max_left;
     resolution += v2( 0.0f,  1.0f) * max_up;
@@ -255,7 +256,7 @@ static void check_and_resolve_collisions(Levels::Level *level, Avatar *avatar)
     {
         avatar->vertical_velocity = 0.0f;
     }
-    if(abs(resolution.x) > 0.0f)
+    if(GameMath::abs(resolution.x) > 0.0f)
     {
         avatar->horizontal_velocity = 0.0f;
     }
@@ -336,9 +337,7 @@ static void draw_avatar(Avatar *avatar)
 
 Levels::Level *Levels::create_level()
 {
-    Level* level = (Level *)Platform::Memory::allocate(sizeof(Level));
-
-    level->avatars.init();
+    Level* level = new Level();
 
     level->grid.init(256, 256);
 
@@ -349,39 +348,24 @@ Levels::Level *Levels::create_level()
 
 void Levels::add_avatar(Level *level, Game::PlayerID id)
 {
-    Avatar *new_avatar = (Avatar *)Platform::Memory::allocate(sizeof(Avatar));
+    Avatar *new_avatar = new Avatar();
     init_avatar(new_avatar, id);
     level->avatars.push_back(new_avatar);
 }
 
 void Levels::remove_avatar(Level *level, Game::PlayerID id)
 {
-    /*
-    Avatar *to_remove = nullptr;
-    int to_remove_index = -1;
-    for(int i = 0; i < level->avatars.size; i++)
-    {
-        if(level->avatars[i]->player_id == id)
-        {
-            to_remove = level->avatars[i];
-            to_remove_index = i;
-            break;
-        }
-    }
-    if(to_remove == nullptr) return;
-
-    Platform::Memory::free(to_remove);
-
-    level->avatars.remove_unordered(to_remove_index);
-    */
+    std::vector<Avatar *>::iterator it = std::find_if(level->avatars.begin(), level->avatars.end(),
+        [&](const Avatar *other) { return id == other->player_id; }
+    );
+    level->avatars.erase(it);
 }
 
 void Levels::step_level(Level *level, float dt)
 {
-    for(int i = 0; i < level->avatars.size; i++)
+    for(Avatar *avatar : level->avatars)
     {
-        Avatar *avatar = level->avatars[i];
-        step_avatar(avatar, level, dt);
+        step_avatar(avatar,level,dt);
     }
 }
 
@@ -392,9 +376,8 @@ void Levels::draw_level(Level *level)
     Graphics::set_camera_position(v2() + camera_offset);
 
     // Draw the players
-    for(int i = 0; i < level->avatars.size; i++)
+    for(Avatar *avatar : level->avatars)
     {
-        Avatar *avatar = level->avatars[i];
         draw_avatar(avatar);
     }
 
@@ -421,74 +404,11 @@ void Levels::draw_level(Level *level)
 
 void Levels::serialize_level(Serialization::Stream *stream, Level *level)
 {
-    // Write the header
-    /*
-    Serialization::write_stream(stream, level->grid.width);
-    Serialization::write_stream(stream, level->grid.height);
-    
-
-    // Write the body
-    v2i tl = level->grid.top_left();
-    v2i br = level->grid.bottom_right();
-    for(v2i pos = tl; pos.y >= br.y; pos.y--)
-    {
-        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
-        {
-            if(level->grid.at(pos)->filled)
-            {
-                Serialization::write_stream(stream, '1');
-            }
-            else
-            {
-                Serialization::write_stream(stream, '0');
-            }
-        }
-    }
-    */
-
-    stream->write(level->avatars.size);
-    for(int i = 0; i < level->avatars.size; i++)
-    {
-        stream->write(level->avatars[i]->position);
-        stream->write(level->avatars[i]->color);
-    }
     
 }
 
 void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
 {
-    // Read the header
-    /*
-    Serialization::read_stream(stream, &(level->grid.width));
-    Serialization::read_stream(stream, &(level->grid.height));
-    
-
-    // Read the body
-    v2i tl = level->grid.top_left();
-    v2i br = level->grid.bottom_right();
-    for(v2i pos = tl; pos.y >= br.y; pos.y--)
-    {
-        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
-        {
-            char c;
-            Serialization::read_stream(stream, &c);
-            level->grid.at(pos)->filled = (c == '1');
-        }
-    }
-    */
-
-    int num_avatars;
-    stream->read(&num_avatars);
-    while(level->avatars.size < num_avatars)
-    {
-        // TODO: Match server players to avatars
-        Levels::add_avatar(level, { -1 });
-    }
-    for(int i = 0; i < num_avatars; i++)
-    {
-        stream->read(&(level->avatars[i]->position));
-        stream->read(&(level->avatars[i]->color));
-    }
     
 }
 

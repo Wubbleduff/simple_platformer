@@ -24,7 +24,6 @@ src\data_structures.cpp \
 src\algorithms.cpp \
 src\game_console.cpp \
 src\levels.cpp \
-src\player.cpp \
 src\serialization.cpp \
 lib\imgui\imgui.cpp \
 lib\imgui\imgui_demo.cpp \

@@ -11,9 +11,12 @@
 
 #include "levels.h"
 
+#include <vector>
+#include <map>
+
 // DEBUG
 #include "imgui.h"
-#include <map>
+
 
 
 using namespace GameMath;
@@ -113,22 +116,19 @@ struct GameState
         SERVER,
     };
     NetworkMode network_mode;
-    union
+    struct Client
     {
-        struct Client
-        {
-            Network::Connection *server_connection;
-        } client;
+        Network::Connection *server_connection;
+    } client;
 
-        struct Server
-        {
-            DynamicArray<Game::PlayerID> remote_players;
-        } server;
-    };
+    struct Server
+    {
+        std::vector<Game::PlayerID> remote_players;
+    } server;
+    
+    Game::PlayerID local_player;
 
     static int next_player_id;
-    DynamicArray<Game::PlayerID> local_players;
-
     std::map<int, Player *> *players_map;
     
 
@@ -158,7 +158,7 @@ static void init_game(GameState **p_instance)
 {
     GameState *&instance = *p_instance;
 
-    instance = (GameState *)Platform::Memory::allocate(sizeof(GameState));
+    instance = new GameState;
 
     instance->running = true;
     instance->seconds_since_last_step = 0.0;
@@ -168,19 +168,17 @@ static void init_game(GameState **p_instance)
 
     instance->players_map = new std::map<int, Player *>();
 
-    instance->local_players.init();
-
-    Game::PlayerID player1_id = Game::Players::add();
-
     instance->num_levels = 1;
-    instance->levels = (Levels::Level **)Platform::Memory::allocate(sizeof(Levels::Level *) * instance->num_levels);
+    instance->levels = new Levels::Level *[instance->num_levels]();
     for(int i = 0; i < instance->num_levels; i++)
     {
         instance->levels[i] = Levels::create_level();
     }
     instance->playing_level = instance->levels[0];
 
-    Levels::add_avatar(instance->playing_level, player1_id);
+
+
+    Game::PlayerID player1_id = Game::Players::add_local();
 }
 
 static void init_imgui()
@@ -228,16 +226,13 @@ static void disconnect_client(GameState *instance)
 
 static void disconnect_server(GameState *instance)
 {
-    for(int i = 0; i < instance->server.remote_players.size; i++)
+    while(instance->server.remote_players.size() > 0)
     {
-        Game::PlayerID id = instance->server.remote_players[i];
-        RemotePlayer *player = (RemotePlayer *)get_player_from_id(instance, id);
-        Network::Connection *& connection = player->connection;
-        Network::disconnect(&connection);
+        Game::PlayerID id = instance->server.remote_players.back();
+        Game::Players::remove_remote(id);
     }
-    instance->server.remote_players.clear();
     Network::stop_listening_for_client_connections();
-    instance->server.remote_players.uninit();
+    Log::log_info("Server shutdown");
 }
 
 static void switch_network_mode(GameState *instance, GameState::NetworkMode mode)
@@ -272,19 +267,15 @@ static void switch_network_mode(GameState *instance, GameState::NetworkMode mode
             disconnect_client(instance);
         }
         instance->network_mode = GameState::NetworkMode::SERVER;
-        instance->server.remote_players.init();
         Network::listen_for_client_connections(4242);
     }
 }
 
 static void step_as_offline(GameState *instance, float time_step)
 {
-    for(int i = 0; i < instance->local_players.size; i++)
-    {
-        Game::PlayerID id = instance->local_players[i];
-        Player *player = get_player_from_id(instance, id);
-        player->read_actions();
-    }
+    Game::PlayerID id = instance->local_player;
+    Player *player = get_player_from_id(instance, id);
+    player->read_actions();
 
     // Update the in game level
     Levels::step_level(instance->playing_level, time_step);
@@ -300,13 +291,6 @@ static void step_as_offline(GameState *instance, float time_step)
     if(ImGui::Button("Switch to client")) switch_network_mode(instance, GameState::NetworkMode::CLIENT);
     if(ImGui::Button("Switch to server")) switch_network_mode(instance, GameState::NetworkMode::SERVER);
 
-    if(ImGui::Button("Add player"))
-    {
-        Game::PlayerID new_id = Game::Players::add();
-
-        Levels::add_avatar(instance->playing_level, new_id);
-    }
-
     GameConsole::draw();
 
     ImGui::End();
@@ -316,18 +300,14 @@ static void step_as_offline(GameState *instance, float time_step)
 
 static void step_as_client(GameState *instance, float time_step)
 {
-    for(int i = 0; i < instance->local_players.size; i++)
-    {
-        Game::PlayerID id = instance->local_players[i];
-        Player *player = get_player_from_id(instance, id);
-        player->read_actions();
-    }
+    Game::PlayerID id = instance->local_player;
+    Player *player = get_player_from_id(instance, id);
+    player->read_actions();
 
     // Send local player inputs to server
     if(instance->client.server_connection)
     {
-        // TODO: 1 client = 1 player for now...
-        Game::PlayerID id = instance->local_players[0];
+        Game::PlayerID id = instance->local_player;
         Player *player = get_player_from_id(instance, id);
         Serialization::Stream *input_stream = Serialization::make_stream();
         for(int i = 0; i < (int)Game::Players::Action::NUM_ACTIONS; i++)
@@ -377,11 +357,21 @@ static void step_as_client(GameState *instance, float time_step)
     if(ImGui::Button("Switch to offline")) switch_network_mode(instance, GameState::NetworkMode::OFFLINE);
     if(ImGui::Button("Switch to server"))  switch_network_mode(instance, GameState::NetworkMode::SERVER);
 
-    char address_string[16] = "127.0.0.1";
+    static char address_string[16] = "127.0.0.1";
     ImGui::InputText("Address", address_string, sizeof(address_string), 0);
-    if(ImGui::Button("Connect to server"))
+    if(instance->client.server_connection == nullptr)
     {
-        instance->client.server_connection = Network::connect(address_string, 4242);
+        if(ImGui::Button("Connect to server"))
+        {
+            instance->client.server_connection = Network::connect(address_string, 4242);
+        }
+    }
+    else
+    {
+        if(ImGui::Button("Disconnect from server"))
+        {
+            disconnect_client(instance);
+        }
     }
 
     Levels::draw_level(instance->playing_level);
@@ -396,37 +386,41 @@ static void step_as_client(GameState *instance, float time_step)
 
 static void step_as_server(GameState *instance, float time_step)
 {
-    // Read local player inputs
-    for(int i = 0; i < instance->local_players.size; i++)
-    {
-        Game::PlayerID id = instance->local_players[i];
-        Player *player = get_player_from_id(instance, id);
-        player->read_actions();
-    }
+    Game::PlayerID id = instance->local_player;
+    Player *player = get_player_from_id(instance, id);
+    player->read_actions();
 
-    // Read remove player inputs
-    for(int i = 0; i < instance->server.remote_players.size; i++)
+    // Read remote player inputs
+    std::vector<Game::PlayerID> disconnected_players;
+    for(int i = 0; i < instance->server.remote_players.size(); i++)
     {
         Game::PlayerID id = instance->server.remote_players[i];
-        Player *player = get_player_from_id(instance, id);
+        RemotePlayer *player = (RemotePlayer *)get_player_from_id(instance, id);
         player->read_actions();
+        if(player->connection == nullptr)
+        {
+            disconnected_players.push_back(id);
+        }
+    }
+    for(Game::PlayerID &id : disconnected_players)
+    {
+        Game::Players::remove_remote(id);
     }
 
     // Update the in game level
     Levels::step_level(instance->playing_level, time_step);
 
-    DynamicArray<Network::Connection *> new_connections = Network::accept_client_connections();
-    for(int i = 0; i < new_connections.size; i++)
+    std::vector<Network::Connection *> new_connections = Network::accept_client_connections();
+    for(int i = 0; i < new_connections.size(); i++)
     {
         Network::Connection *new_connection = new_connections[i];
         Game::PlayerID id = Game::Players::add_remote(new_connection);
     }
-    new_connections.uninit();
 
     Serialization::Stream *game_stream = Serialization::make_stream();
     serialize_game(instance, game_stream);
     game_stream->move_to_beginning();
-    for(int i = 0; i < instance->server.remote_players.size; i++)
+    for(int i = 0; i < instance->server.remote_players.size(); i++)
     {
         Game::PlayerID id = instance->server.remote_players[i];
         RemotePlayer *player = (RemotePlayer *)get_player_from_id(instance, id); // What's a more type safe way of doing this?
@@ -587,39 +581,65 @@ static int get_next_player_id(GameState *instance)
 {
     return instance->next_player_id++;
 }
-Game::PlayerID Game::Players::add()
+Game::PlayerID Game::Players::add_local()
 {
+    PlayerID result;
     // TODO: What to do with new?
     LocalPlayer *new_player = new LocalPlayer;
     Platform::Memory::memset(new_player->current_actions, 0, sizeof(bool) * (int)Game::Players::Action::NUM_ACTIONS);
 
     int id = get_next_player_id(instance);
+    result.id = id;
 
     (*instance->players_map)[id] = new_player;
-    instance->local_players.push_back({ id });
+    instance->local_player = result;
 
-    return { id };
+    Levels::add_avatar(instance->playing_level, result);
+
+    return result;
+}
+
+void Game::Players::remove_local(Game::PlayerID id)
+{
+    Levels::remove_avatar(instance->playing_level, id);
+    instance->local_player = { -1 };
+    instance->players_map->erase(id.id);
 }
 
 Game::PlayerID Game::Players::add_remote(Network::Connection *connection)
 {
+    PlayerID result;
     // TODO: What to do with new?
     RemotePlayer *new_player = new RemotePlayer;
     Platform::Memory::memset(new_player->current_actions, 0, sizeof(bool) * (int)Game::Players::Action::NUM_ACTIONS);
 
+    new_player->connection = connection;
+
     int id = get_next_player_id(instance);
+    result.id = id;
 
     (*instance->players_map)[id] = new_player;
-    instance->server.remote_players.push_back({ id });
+    instance->server.remote_players.push_back(result);
 
-    return { id };
+    Levels::add_avatar(instance->playing_level, result);
+
+    return result;
 }
 
-void Game::Players::remove(PlayerID id)
+void Game::Players::remove_remote(Game::PlayerID id)
 {
+    RemotePlayer *player = (RemotePlayer *)get_player_from_id(instance, id);
+    if(player && player->connection)
+    {
+        Network::disconnect(&(player->connection));
+    }
+
+    Levels::remove_avatar(instance->playing_level, id);
+    instance->server.remote_players.erase(std::find(instance->server.remote_players.begin(), instance->server.remote_players.end(), id));
     instance->players_map->erase(id.id);
-    //std::map<int, Player *>::iterator to_remove_it = instance->players_map->find(id.id);
 }
+
+
 
 bool Game::Players::action(PlayerID id, Action action)
 {
