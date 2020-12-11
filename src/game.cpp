@@ -90,13 +90,6 @@ struct RemotePlayer : public Player
     }
 };
 
-/*
-struct AiPlayer : public Player
-{
-    void read_actions() override;
-}
-*/
-
 struct GameState
 {
     static const double TARGET_STEP_TIME;
@@ -106,8 +99,6 @@ struct GameState
 
     double seconds_since_last_step;
     double last_loop_time;
-
-
 
     enum class NetworkMode
     {
@@ -123,13 +114,12 @@ struct GameState
 
     struct Server
     {
-        std::vector<Game::PlayerID> remote_players;
     } server;
     
-    Game::PlayerID local_player;
+    PlayerList local_players;
+    PlayerList remote_players;
 
     static int next_player_id;
-    std::map<int, Player *> *players_map;
     
 
     int num_levels;
@@ -224,6 +214,16 @@ static void disconnect_client(GameState *instance)
     Network::disconnect(&instance->client.server_connection);
 }
 
+static void serialize_player(Serialization::Stream *stream, Player *player)
+{
+    for(int i = 0; i < (int)Game::Players::Action::NUM_ACTIONS; i++)
+    {
+        bool action = player->current_actions[i];
+        int value = (action == 0) ? false : true;
+        stream->write(value);
+    }
+}
+
 static void disconnect_server(GameState *instance)
 {
     while(instance->server.remote_players.size() > 0)
@@ -300,28 +300,25 @@ static void step_as_offline(GameState *instance, float time_step)
 
 static void step_as_client(GameState *instance, float time_step)
 {
-    Game::PlayerID id = instance->local_player;
-    Player *player = get_player_from_id(instance, id);
-    player->read_actions();
+    for(Player *player : Players::players_list)
+    {
+        player->read_actions();
+    }
 
-    // Send local player inputs to server
+    // Send the local player's input to the server
     if(instance->client.server_connection)
     {
-        Game::PlayerID id = instance->local_player;
-        Player *player = get_player_from_id(instance, id);
+        Player *local_player = Players::get_local_player();
         Serialization::Stream *input_stream = Serialization::make_stream();
-        for(int i = 0; i < (int)Game::Players::Action::NUM_ACTIONS; i++)
-        {
-            bool action = player->current_actions[i];
-            int value = (action == 0) ? false : true;
-            input_stream->write(value);
-        }
+        serialize_player(input_stream, local_player);
         instance->client.server_connection->send_stream(input_stream);
         Serialization::free_stream(input_stream);
     }
 
-    // Read server game state
-    
+    // Step the game locally using given input
+    Levels::step_level(instance->playing_level, time_step);
+
+    // Read server's game state
     Network::Connection *connection_to_server = instance->client.server_connection;
     if(connection_to_server)
     {
@@ -335,16 +332,14 @@ static void step_as_client(GameState *instance, float time_step)
         else if(result == Network::ReadResult::READY)
         {
             game_stream->move_to_beginning();
-            deserialize_game(instance, game_stream);
+
+            // Fix the local game state with the server game state
+            fix_game_state(game_stream);
         }
 
         Serialization::free_stream(game_stream);
     }
-    else
-    {
-        Levels::step_level(instance->playing_level, time_step);
-    }
-    
+
 
 
     // Draw
@@ -386,30 +381,6 @@ static void step_as_client(GameState *instance, float time_step)
 
 static void step_as_server(GameState *instance, float time_step)
 {
-    Game::PlayerID id = instance->local_player;
-    Player *player = get_player_from_id(instance, id);
-    player->read_actions();
-
-    // Read remote player inputs
-    std::vector<Game::PlayerID> disconnected_players;
-    for(int i = 0; i < instance->server.remote_players.size(); i++)
-    {
-        Game::PlayerID id = instance->server.remote_players[i];
-        RemotePlayer *player = (RemotePlayer *)get_player_from_id(instance, id);
-        player->read_actions();
-        if(player->connection == nullptr)
-        {
-            disconnected_players.push_back(id);
-        }
-    }
-    for(Game::PlayerID &id : disconnected_players)
-    {
-        Game::Players::remove_remote(id);
-    }
-
-    // Update the in game level
-    Levels::step_level(instance->playing_level, time_step);
-
     std::vector<Network::Connection *> new_connections = Network::accept_client_connections();
     for(int i = 0; i < new_connections.size(); i++)
     {
@@ -417,21 +388,33 @@ static void step_as_server(GameState *instance, float time_step)
         Game::PlayerID id = Game::Players::add_remote(new_connection);
     }
 
-    Serialization::Stream *game_stream = Serialization::make_stream();
-    serialize_game(instance, game_stream);
-    game_stream->move_to_beginning();
-    for(int i = 0; i < instance->server.remote_players.size(); i++)
+    for(Player *player : Players::players_list)
     {
-        Game::PlayerID id = instance->server.remote_players[i];
-        RemotePlayer *player = (RemotePlayer *)get_player_from_id(instance, id); // What's a more type safe way of doing this?
-        Network::Connection *connection_to_client = player->connection;
-
-        if(connection_to_client == nullptr) continue;
-
-        connection_to_client->send_stream(game_stream);
+        player->read_actions();
     }
-    Serialization::free_stream(game_stream);
 
+    // Update the in game level
+    Levels::step_level(instance->playing_level, time_step);
+
+    // Broadcast the players and game state
+    {
+        Serialization::Stream *game_stream = Serialization::make_stream();
+        serialize_game(instance, game_stream);
+        game_stream->move_to_beginning();
+        for(int i = 0; i < instance->server.remote_players.size(); i++)
+        {
+            Game::PlayerID id = instance->server.remote_players[i];
+            RemotePlayer *player = (RemotePlayer *)get_player_from_id(instance, id); // What's a more type safe way of doing this?
+            Network::Connection *connection_to_client = player->connection;
+
+            if(connection_to_client == nullptr) continue;
+
+            connection_to_client->send_stream(game_stream);
+        }
+        Serialization::free_stream(game_stream);
+    }
+
+    // Draw game
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
     imgui_begin_frame();
     ImGui::Begin("Debug");
