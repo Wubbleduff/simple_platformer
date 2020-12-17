@@ -134,6 +134,16 @@ struct Levels::Level
 
 
 
+
+static Avatar *avatar_from_player_id(Levels::Level *level, PlayerID id)
+{
+    for(int i = 0; i < level->avatars.size(); i++)
+    {
+        if(level->avatars[i]->player_id == id) return level->avatars[i];
+    }
+    return nullptr;
+}
+
 static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
 {
     float a_left   = a_bl.x;
@@ -408,13 +418,25 @@ void Levels::serialize_level(Serialization::Stream *stream, Level *level)
     for(int i = 0; i < level->avatars.size(); i++)
     {
         Avatar *avatar = level->avatars[i];
-        stream->write();
+        stream->write(avatar->player_id);
+        stream->write(avatar->position);
+        stream->write(avatar->color);
     }
 }
 
 void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
 {
-    
+    int num_avatars;
+    stream->read(&num_avatars);
+    for(int i = 0; i < num_avatars; i++)
+    {
+        PlayerID remote_id;
+        stream->read((int *)&remote_id);
+        PlayerID local_id = Players::remote_to_local_player_id(remote_id);
+        Avatar *avatar = avatar_from_player_id(level, local_id);
+        stream->read(&avatar->position);
+        stream->read(&avatar->color);
+    }
 }
 
 

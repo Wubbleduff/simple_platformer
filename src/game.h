@@ -5,7 +5,6 @@
 #include <vector>
 
 typedef int PlayerID;
-
 struct Players
 {
     enum class Action
@@ -18,6 +17,7 @@ struct Players
     };
 
     static bool action(PlayerID id, Action action);
+    static PlayerID remote_to_local_player_id(PlayerID remote_id);
 };
 
 struct Game

@@ -519,10 +519,12 @@ void Graphics::ImGuiImplementation::new_frame()
 {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
 }
 
 void Graphics::ImGuiImplementation::end_frame()
 {
+    ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 

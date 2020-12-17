@@ -29,66 +29,6 @@ struct Player
     bool current_actions[(int)Players::Action::NUM_ACTIONS];
 };
 
-
-
-/*
-struct LocalPlayer : public Player
-{
-    void read_actions() override
-    {
-        current_actions[(int)Players::Action::MOVE_RIGHT] = Platform::Input::key('D');
-        current_actions[(int)Players::Action::MOVE_LEFT] = Platform::Input::key('A');
-        current_actions[(int)Players::Action::JUMP] = Platform::Input::key_down(' ');
-    }
-
-    void cleanup() override {}
-};
-
-struct RemotePlayer : public Player
-{
-    Network::Connection *connection;
-
-    void read_actions() override
-    {
-        if(connection == nullptr) return;
-
-        Serialization::Stream *input_stream = Serialization::make_stream();
-
-        Network::ReadResult result = connection->read_into_stream(input_stream);
-
-        if(result == Network::ReadResult::CLOSED)
-        {
-            Network::disconnect(&connection);
-            Serialization::free_stream(input_stream);
-            return;
-        }
-        else if(result == Network::ReadResult::READY)
-        {
-            input_stream->move_to_beginning();
-        }
-
-        // TODO: Sanitize ...
-
-        int i = 0;
-        while(!input_stream->at_end())
-        {
-            int value;
-            input_stream->read(&value);
-            current_actions[i] = (value == 0) ? false : true;
-
-            i++;
-        }
-
-        Serialization::free_stream(input_stream);
-    }
-
-    void cleanup() override
-    {
-        Network::disconnect(&connection);
-    }
-};
-*/
-
 struct GameState
 {
     static const double TARGET_STEP_TIME;
@@ -106,6 +46,7 @@ struct GameState
         SERVER,
     };
     NetworkMode network_mode;
+
     struct Client
     {
         Network::Connection *server_connection;
@@ -117,13 +58,11 @@ struct GameState
     {
         std::vector<PlayerID> remote_players;
         std::map<PlayerID, Network::Connection *> remote_player_connections;
-
     } server;
     
     struct PlayersState
     {
         PlayerID local_player;
-
         int next_player_id;
         std::map<PlayerID, Player *> all_players;
     } players_state;
@@ -149,65 +88,6 @@ static Player *player_from_id(GameState *instance, PlayerID id)
     }
 
     return nullptr;
-}
-
-static void init_game(GameState **p_instance)
-{
-    GameState *&instance = *p_instance;
-
-    instance = new GameState;
-
-    instance->running = true;
-    instance->seconds_since_last_step = 0.0;
-    instance->last_loop_time = 0.0;
-
-    instance->network_mode = GameState::NetworkMode::OFFLINE;
-
-    instance->players_state.next_player_id = { 0 };
-
-    instance->num_levels = 1;
-    instance->levels = new Levels::Level *[instance->num_levels]();
-    for(int i = 0; i < instance->num_levels; i++)
-    {
-        instance->levels[i] = Levels::create_level();
-    }
-    instance->playing_level = instance->levels[0];
-
-
-    
-    // Add the local player
-    instance->players_state.local_player = 0;
-    instance->players_state.all_players[instance->players_state.local_player] = new Player();
-    Levels::add_avatar(instance->playing_level, instance->players_state.local_player);
-    instance->players_state.next_player_id = 1;
-}
-
-static void init_imgui()
-{
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-    
-    // Setup Dear ImGui style
-    ImGui::StyleColorsDark();
-    //ImGui::StyleColorsClassic();
-    
-    // Setup Platform/Renderer bindings
-    Graphics::ImGuiImplementation::init();
-}
-
-static void imgui_begin_frame()
-{
-    Graphics::ImGuiImplementation::new_frame();
-    ImGui::NewFrame();
-}
-
-static void imgui_end_frame()
-{
-    ImGui::Render();
-    Graphics::ImGuiImplementation::end_frame();
 }
 
 static bool remote_id_known(GameState *instance, PlayerID remote_id)
@@ -446,7 +326,7 @@ static void step_as_offline(GameState *instance, float time_step)
     Levels::step_level(instance->playing_level, time_step);
 
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
-    imgui_begin_frame();
+    Graphics::ImGuiImplementation::new_frame();
     ImGui::Begin("Debug");
 
     Levels::draw_level(instance->playing_level);
@@ -459,7 +339,7 @@ static void step_as_offline(GameState *instance, float time_step)
     GameConsole::draw();
 
     ImGui::End();
-    imgui_end_frame();
+    Graphics::ImGuiImplementation::end_frame();
     Graphics::swap_frames();
 }
 
@@ -518,7 +398,7 @@ static void step_as_client(GameState *instance, float time_step)
 
     // Draw
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
-    imgui_begin_frame();
+    Graphics::ImGuiImplementation::new_frame();
     ImGui::Begin("Debug");
 
     ImGui::Text("CLIENT");
@@ -548,7 +428,7 @@ static void step_as_client(GameState *instance, float time_step)
     GameConsole::draw();
 
     ImGui::End();
-    imgui_end_frame();
+    Graphics::ImGuiImplementation::end_frame();
     Graphics::swap_frames();
 }
 
@@ -621,6 +501,8 @@ static void step_as_server(GameState *instance, float time_step)
                 }
             }
 
+            Levels::serialize_level(game_stream, instance->playing_level);
+
             send_to_connection->send_stream(game_stream);
             game_stream->clear();
         }
@@ -632,7 +514,7 @@ static void step_as_server(GameState *instance, float time_step)
 
     // Draw game
     Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
-    imgui_begin_frame();
+    Graphics::ImGuiImplementation::new_frame();
     ImGui::Begin("Debug");
 
     ImGui::Text("SERVER");
@@ -645,15 +527,13 @@ static void step_as_server(GameState *instance, float time_step)
     GameConsole::draw();
 
     ImGui::End();
-    imgui_end_frame();
+    Graphics::ImGuiImplementation::end_frame();
     Graphics::swap_frames();
 
 }
 
 static void do_one_step(GameState *instance, float time_step)
 {
-    
-
     switch(instance->network_mode)
     {
         case GameState::NetworkMode::OFFLINE:
@@ -697,6 +577,53 @@ static void shutdown_game(GameState *instance)
     }
 
     Graphics::ImGuiImplementation::shutdown();
+}
+
+static void init_game(GameState **p_instance)
+{
+    GameState *&instance = *p_instance;
+
+    instance = new GameState;
+
+    instance->running = true;
+    instance->seconds_since_last_step = 0.0;
+    instance->last_loop_time = 0.0;
+
+    instance->network_mode = GameState::NetworkMode::OFFLINE;
+
+    instance->players_state.next_player_id = { 0 };
+
+    instance->num_levels = 1;
+    instance->levels = new Levels::Level *[instance->num_levels]();
+    for(int i = 0; i < instance->num_levels; i++)
+    {
+        instance->levels[i] = Levels::create_level();
+    }
+    instance->playing_level = instance->levels[0];
+
+
+    
+    // Add the local player
+    instance->players_state.local_player = 0;
+    instance->players_state.all_players[instance->players_state.local_player] = new Player();
+    Levels::add_avatar(instance->playing_level, instance->players_state.local_player);
+    instance->players_state.next_player_id = 1;
+}
+
+static void init_imgui()
+{
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    
+    // Setup Dear ImGui style
+    ImGui::StyleColorsDark();
+    //ImGui::StyleColorsClassic();
+    
+    // Setup Platform/Renderer bindings
+    Graphics::ImGuiImplementation::init();
 }
 
 
@@ -787,6 +714,16 @@ bool Players::action(PlayerID id, Action action)
     }
 
     return false;
+}
+
+PlayerID Players::remote_to_local_player_id(PlayerID remote_id)
+{
+    std::map<PlayerID, PlayerID>::iterator it = Game::instance->client.remote_to_local_id_map.find(remote_id);
+    if(it == Game::instance->client.remote_to_local_id_map.end())
+    {
+        return -1;
+    }
+    return it->second;
 }
 
 
