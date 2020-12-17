@@ -24,18 +24,24 @@ using namespace GameMath;
 
 
 
-struct Player
+struct GameState
 {
-    bool current_actions[(int)Players::Action::NUM_ACTIONS];
+    unsigned int frame_number;
+    std::vector<GameInput> inputs;
+    Levels::Level *playing_level;
+
+    void step_as_offline(float time_step);
+    void step_as_client(float time_step);
+    void step_as_server(float time_step);
+    void serialize_into(Serialization::Stream *stream);
+    void deserialize_from(Serialization::Stream *stream);
 };
 
-struct GameState
+struct ProgramState
 {
     static const double TARGET_STEP_TIME;
     static const int MAX_STEPS_PER_LOOP;
-
     bool running;
-
     double seconds_since_last_step;
     double last_loop_time;
 
@@ -50,345 +56,185 @@ struct GameState
     struct Client
     {
         Network::Connection *server_connection;
-        std::vector<PlayerID> remote_players;
-        std::map<PlayerID, PlayerID> remote_to_local_id_map;
+
+        void connect_to_server(const char *ip_address, int port);
+        void disconnect_from_server();
     } client;
 
     struct Server
     {
-        std::vector<PlayerID> remote_players;
-        std::map<PlayerID, Network::Connection *> remote_player_connections;
+        struct ClientConnection
+        {
+            GameInput::UID uid = 0;
+            Network::Connection *connection = nullptr;
+        };
+        std::vector<ClientConnection> client_connections;
+        GameInput::UID next_input_uid = 1;
+
+        void startup(int port);
+        void shutdown();
+        void add_client_connection(Network::Connection *connection);
+        void remove_disconnected_clients();
+        void broadcast_to_clients(Serialization::Stream *stream);
     } server;
-    
-    struct PlayersState
-    {
-        PlayerID local_player;
-        int next_player_id;
-        std::map<PlayerID, Player *> all_players;
-    } players_state;
-    
+
+    GameState *current_game_state;
 
 
-    int num_levels;
-    Levels::Level **levels;
-    Levels::Level *playing_level;
+
+    void init();
+    void do_one_step(float time_step);
+    void switch_network_mode(NetworkMode mode);
+    void shutdown();
 };
-GameState *Game::instance = nullptr;
-const double GameState::TARGET_STEP_TIME = 0.01666; // In seconds
-const int GameState::MAX_STEPS_PER_LOOP = 10;
+ProgramState *Game::program_state = nullptr;
+const double ProgramState::TARGET_STEP_TIME = 0.01666; // In seconds
+const int ProgramState::MAX_STEPS_PER_LOOP = 10;
+static const int SERVER_PORT = 4242;
 
 
 
-static Player *player_from_id(GameState *instance, PlayerID id)
+bool GameInput::action(Action action)
 {
-    auto it = instance->players_state.all_players.find(id);
-    if(it != instance->players_state.all_players.end())
-    {
-        return it->second;
-    }
-
-    return nullptr;
+    return current_actions[(int)action];
 }
 
-static bool remote_id_known(GameState *instance, PlayerID remote_id)
+void GameInput::serialize_into(Serialization::Stream *stream)
 {
-    auto it = instance->client.remote_to_local_id_map.find(remote_id);
-    return it != instance->client.remote_to_local_id_map.end();
-}
-
-static int get_next_player_id(GameState *instance)
-{
-    return instance->players_state.next_player_id++;
-}
-
-static PlayerID add_remote_player_as_client(GameState *instance, PlayerID remote_id)
-{
-    PlayerID id = get_next_player_id(instance);
-    instance->players_state.all_players[id] = new Player();
-    instance->client.remote_players.push_back(id);
-    instance->client.remote_to_local_id_map[remote_id] = id;
-    Levels::add_avatar(instance->playing_level, id);
-
-    return id;
-}
-
-static void remove_remote_player_as_client(GameState *instance, PlayerID id_to_remove)
-{
-    Levels::remove_avatar(instance->playing_level, id_to_remove);
-
-    for(auto it = instance->client.remote_to_local_id_map.begin();
-            it != instance->client.remote_to_local_id_map.end(); ++it)
+    for(int i = 0; i < (int)Action::NUM_ACTIONS; i++)
     {
-        if(it->second == id_to_remove)
-        {
-            it = instance->client.remote_to_local_id_map.erase(it);
-            break;
-        }
-    }
-    instance->client.remote_players.erase(
-        std::remove(instance->client.remote_players.begin(), instance->client.remote_players.end(), id_to_remove),
-        instance->client.remote_players.end());
-
-    delete instance->players_state.all_players[id_to_remove];
-    instance->players_state.all_players.erase(id_to_remove);
-}
-
-static PlayerID add_remote_player_as_server(GameState *instance, Network::Connection *connection)
-{
-    PlayerID id = get_next_player_id(instance);
-    instance->players_state.all_players[id] = new Player();
-    instance->server.remote_players.push_back(id);
-    instance->server.remote_player_connections[id] = connection;
-    Levels::add_avatar(instance->playing_level, id);
-
-    return id;
-}
-
-static void remove_remote_player_as_server(GameState *instance, PlayerID id_to_remove)
-{
-    Network::Connection *connection = instance->server.remote_player_connections[id_to_remove];
-    Network::disconnect(&connection);
-
-    Levels::remove_avatar(instance->playing_level, id_to_remove);
-    instance->server.remote_player_connections.erase(id_to_remove);
-    instance->server.remote_players.erase(
-            std::remove(instance->server.remote_players.begin(), instance->server.remote_players.end(), id_to_remove),
-        instance->server.remote_players.end());
-    delete instance->players_state.all_players[id_to_remove];
-    instance->players_state.all_players.erase(id_to_remove);
-}
-
-static void fix_game_state(GameState *instance, Serialization::Stream *stream)
-{
-    // Deserialize the game
-
-    // Deserialize the player list
-    int num_players;
-    std::vector<PlayerID> players_seen;
-    stream->read(&num_players);
-    for(int i = 0; i < num_players; i++)
-    {
-        // Read remote id
-        int remote_id;
-        stream->read(&remote_id);
-
-        PlayerID local_id;
-
-        // Check if the player is known on the client
-        bool remote_known = remote_id_known(instance, remote_id);
-        if(!remote_known)
-        {
-            // New player connected on server
-            local_id = add_remote_player_as_client(instance, remote_id);
-        }
-        else
-        {
-            local_id = instance->client.remote_to_local_id_map[remote_id];
-        }
-
-        Player *player = instance->players_state.all_players[local_id];
-        players_seen.push_back(local_id);
-
-        // Read actions
-        for(int i = 0; i < (int)Players::Action::NUM_ACTIONS; i++)
-        {
-            int value;
-            stream->read(&value);
-            player->current_actions[i] = (value == 0) ? false : true;;
-        }
-    }
-    std::vector<PlayerID> disconnected_players;
-    for(PlayerID player_id : instance->client.remote_players)
-    {
-        auto seen_player_location = std::find(players_seen.begin(), players_seen.end(), player_id);
-        if(seen_player_location == players_seen.end())
-        {
-            disconnected_players.push_back(player_id);
-        }
-    }
-    while(disconnected_players.size() > 0)
-    {
-        remove_remote_player_as_client(instance, disconnected_players.back());
-        disconnected_players.pop_back();
-    }
-
-    // Deserialize the level
-    Levels::deserialize_level(stream, instance->playing_level);
-}
-
-static void disconnect_client(GameState *instance)
-{
-    while(instance->client.remote_players.size() > 0)
-    {
-        remove_remote_player_as_client(instance, instance->client.remote_players.back());
-    }
-    Network::disconnect(&instance->client.server_connection);
-}
-
-static void disconnect_server(GameState *instance)
-{
-    while(instance->server.remote_players.size() > 0)
-    {
-        remove_remote_player_as_server(instance, instance->server.remote_players.back());
-    }
-    Network::stop_listening_for_client_connections();
-    Log::log_info("Server shutdown");
-}
-
-static void switch_network_mode(GameState *instance, GameState::NetworkMode mode)
-{
-    if(mode == GameState::NetworkMode::OFFLINE)
-    {
-        if(instance->network_mode == GameState::NetworkMode::CLIENT)
-        {
-            disconnect_client(instance);
-        }
-        if(instance->network_mode == GameState::NetworkMode::SERVER)
-        {
-            disconnect_server(instance);
-        }
-        instance->network_mode = GameState::NetworkMode::OFFLINE;
-    }
-
-    if(mode == GameState::NetworkMode::CLIENT)
-    {
-        if(instance->network_mode == GameState::NetworkMode::SERVER)
-        {
-            disconnect_server(instance);
-        }
-        instance->network_mode = GameState::NetworkMode::CLIENT;
-        instance->client.server_connection = nullptr;
-    }
-
-    if(mode == GameState::NetworkMode::SERVER)
-    {
-        if(instance->network_mode == GameState::NetworkMode::CLIENT)
-        {
-            disconnect_client(instance);
-        }
-        instance->network_mode = GameState::NetworkMode::SERVER;
-        Network::listen_for_client_connections(4242);
+        stream->write((int)current_actions[i]);
     }
 }
 
-static void read_local_input(Player *player)
+void GameInput::deserialize_from(Serialization::Stream *stream)
 {
-    player->current_actions[(int)Players::Action::MOVE_RIGHT] = Platform::Input::key('D');
-    player->current_actions[(int)Players::Action::MOVE_LEFT] = Platform::Input::key('A');
-    player->current_actions[(int)Players::Action::JUMP] = Platform::Input::key_down(' ');
+    for(int i = 0; i < (int)Action::NUM_ACTIONS; i++)
+    {
+        int value;
+        stream->read(&value);
+        current_actions[i] = (value == 0) ? false : true;
+    }
 }
 
-static bool read_remote_input(Player *player, Network::Connection *connection)
+void GameInput::read_from_local()
 {
-    assert(connection != nullptr);
+    current_actions[(int)Action::MOVE_RIGHT] = Platform::Input::key('D');
+    current_actions[(int)Action::MOVE_LEFT] = Platform::Input::key('A');
+    current_actions[(int)Action::JUMP] = Platform::Input::key_down(' ');
+}
+
+void GameInput::read_from_connection(Network::Connection **connection)
+{
+    assert(*connection != nullptr);
 
     Serialization::Stream *input_stream = Serialization::make_stream();
 
-    Network::ReadResult result = connection->read_into_stream(input_stream);
+    Network::ReadResult result = (*connection)->read_into_stream(input_stream);
 
     if(result == Network::ReadResult::CLOSED)
     {
-        //Network::disconnect(&connection);
+        Network::disconnect(connection);
         Serialization::free_stream(input_stream);
-        return false;
+        return;
     }
     else if(result == Network::ReadResult::READY)
     {
         input_stream->move_to_beginning();
-    }
 
-    // TODO: Sanitize ...
+        // TODO: Sanitize ...
 
-    int i = 0;
-    while(!input_stream->at_end())
-    {
-        int value;
-        input_stream->read(&value);
-        player->current_actions[i] = (value == 0) ? false : true;
-
-        i++;
+        deserialize_from(input_stream);
     }
 
     Serialization::free_stream(input_stream);
-
-    return true;
 }
 
-static void step_as_offline(GameState *instance, float time_step)
-{
-    Platform::Input::read_input();
 
-    PlayerID id = instance->players_state.local_player;
-    Player *player = player_from_id(instance, id);
-    read_local_input(player);
+
+void GameState::step_as_offline(float time_step)
+{
+    frame_number++;
+
+    Platform::Input::read_input();
+    GameInput local_input = {};
+    local_input.read_from_local();
+    inputs.resize(1);
+    inputs[0] = local_input;
 
     // Update the in game level
-    Levels::step_level(instance->playing_level, time_step);
+    Levels::step_level(inputs, playing_level, time_step);
 
-    Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
-    Graphics::ImGuiImplementation::new_frame();
-    ImGui::Begin("Debug");
 
-    Levels::draw_level(instance->playing_level);
 
-    ImGui::Text("OFFLINE");
+    // Draw
+    {
+        Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
+        Graphics::ImGuiImplementation::new_frame();
+        ImGui::Begin("Debug");
 
-    if(ImGui::Button("Switch to client")) switch_network_mode(instance, GameState::NetworkMode::CLIENT);
-    if(ImGui::Button("Switch to server")) switch_network_mode(instance, GameState::NetworkMode::SERVER);
+        Levels::draw_level(playing_level);
 
-    GameConsole::draw();
+        ImGui::Text("OFFLINE");
 
-    ImGui::End();
-    Graphics::ImGuiImplementation::end_frame();
-    Graphics::swap_frames();
+        if(ImGui::Button("Switch to client")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
+        if(ImGui::Button("Switch to server")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+
+        GameConsole::draw();
+
+        ImGui::End();
+        Graphics::ImGuiImplementation::end_frame();
+        Graphics::swap_frames();
+    }
 }
 
-static void step_as_client(GameState *instance, float time_step)
+void GameState::step_as_client(float time_step)
 {
-    Platform::Input::read_input();
-
-    // Read the local player input
-    PlayerID local_player_id = instance->players_state.local_player;
-    Player *local_player = player_from_id(instance, local_player_id);
-    read_local_input(local_player);
-
     // Send the local player's input to the server
-    if(instance->client.server_connection)
+    Platform::Input::read_input();
+    if(Game::program_state->client.server_connection)
     {
         Serialization::Stream *input_stream = Serialization::make_stream();
 
-        // Serialize local player input
-        for(int i = 0; i < (int)Players::Action::NUM_ACTIONS; i++)
-        {
-            bool action = local_player->current_actions[i];
-            int value = (action == 0) ? false : true;
-            input_stream->write(value);
-        }
+        GameInput local_input;
+        local_input.read_from_local();
+        local_input.serialize_into(input_stream);
+        Game::program_state->client.server_connection->send_stream(input_stream);
 
-        instance->client.server_connection->send_stream(input_stream);
         Serialization::free_stream(input_stream);
     }
 
-    // Step the game locally using given input
-    Levels::step_level(instance->playing_level, time_step);
+#define CLIENT_PREDICTION 0
+    // Step the game forward in time
+#if CLIENT_PREDICTION
+    // ...
+#endif
 
     // Read server's game state
-    Network::Connection *connection_to_server = instance->client.server_connection;
-    if(connection_to_server)
+    if(Game::program_state->client.server_connection)
     {
         Serialization::Stream *game_stream = Serialization::make_stream();
-        Network::ReadResult result = connection_to_server->read_into_stream(game_stream);
+        Network::ReadResult result = Game::program_state->client.server_connection->read_into_stream(game_stream);
         
         if(result == Network::ReadResult::CLOSED)
         {
-            disconnect_client(instance);
+            Game::program_state->client.disconnect_from_server();
         }
         else if(result == Network::ReadResult::READY)
         {
             game_stream->move_to_beginning();
 
             // Fix the local game state with the server game state
-            fix_game_state(instance, game_stream);
+            // This should happen in the future
+#if CLIENT_PREDICTION
+            GameState *servers_game_state = new GameState();
+            deserialize_game_state(game_stream, servers_game_state);
+            fix_game_state(game_state_list, servers_game_state);
+            delete server_game_state;
+#endif
+
+            // For now, we'll just be a dumb-client
+            deserialize_from(game_stream);
         }
 
         Serialization::free_stream(game_stream);
@@ -397,181 +243,271 @@ static void step_as_client(GameState *instance, float time_step)
 
 
     // Draw
-    Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
-    Graphics::ImGuiImplementation::new_frame();
-    ImGui::Begin("Debug");
-
-    ImGui::Text("CLIENT");
-
-    if(ImGui::Button("Switch to offline")) switch_network_mode(instance, GameState::NetworkMode::OFFLINE);
-    if(ImGui::Button("Switch to server"))  switch_network_mode(instance, GameState::NetworkMode::SERVER);
-
-    static char address_string[16] = "127.0.0.1";
-    ImGui::InputText("Address", address_string, sizeof(address_string), 0);
-    if(instance->client.server_connection == nullptr)
     {
-        if(ImGui::Button("Connect to server"))
+        Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
+        Graphics::ImGuiImplementation::new_frame();
+        ImGui::Begin("Debug");
+
+        ImGui::Text("CLIENT");
+
+        if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
+        if(ImGui::Button("Switch to server"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+
+        static char address_string[16] = "127.0.0.1";
+        ImGui::InputText("Address", address_string, sizeof(address_string), 0);
+        if(Game::program_state->client.server_connection == nullptr)
         {
-            instance->client.server_connection = Network::connect(address_string, 4242);
+            if(ImGui::Button("Connect to server"))
+            {
+                Game::program_state->client.connect_to_server(address_string, SERVER_PORT);
+            }
         }
-    }
-    else
-    {
-        if(ImGui::Button("Disconnect from server"))
+        else
         {
-            disconnect_client(instance);
+            if(ImGui::Button("Disconnect from server"))
+            {
+                Game::program_state->client.disconnect_from_server();
+            }
         }
+
+        Levels::draw_level(playing_level);
+
+        GameConsole::draw();
+
+        ImGui::End();
+        Graphics::ImGuiImplementation::end_frame();
+        Graphics::swap_frames();
     }
-
-    Levels::draw_level(instance->playing_level);
-
-    GameConsole::draw();
-
-    ImGui::End();
-    Graphics::ImGuiImplementation::end_frame();
-    Graphics::swap_frames();
 }
 
-
-static void step_as_server(GameState *instance, float time_step)
+void GameState::step_as_server(float time_step)
 {
-    Platform::Input::read_input();
+    frame_number++;
 
     // Accept new connections to the server
     std::vector<Network::Connection *> new_connections = Network::accept_client_connections();
     for(int i = 0; i < new_connections.size(); i++)
     {
         Network::Connection *new_connection = new_connections[i];
-        PlayerID id = add_remote_player_as_server(instance, new_connection);
+        Game::program_state->server.add_client_connection(new_connection);
     }
+
+    // Prepare for reading input
+    Platform::Input::read_input();
+    std::vector<GameInput> this_frames_inputs;
 
     // Read local player's input
-    PlayerID local_player_id = instance->players_state.local_player;
-    Player *local_player = player_from_id(instance, local_player_id);
-    read_local_input(local_player);
+    GameInput local_input = {};
+    local_input.read_from_local();
+    this_frames_inputs.push_back(local_input);
 
     // Read remote player's input
-    std::vector<PlayerID> disconnected_players;
-    for(const std::pair<PlayerID, Network::Connection *> &pair : instance->server.remote_player_connections)
+    for(ProgramState::Server::ClientConnection &client : Game::program_state->server.client_connections)
     {
-        Player *remote_player = player_from_id(instance, pair.first);
-        Network::Connection *connection = pair.second;
-        bool still_connected = read_remote_input(remote_player, connection);
-        if(!still_connected) disconnected_players.push_back(pair.first);
+        GameInput remote_input;
+        remote_input.uid = client.uid;
+        remote_input.read_from_connection(&(client.connection));
+        if(client.connection != nullptr)
+        {
+            this_frames_inputs.push_back(remote_input);
+        }
     }
     // Clean out disconnected connections
-    while(disconnected_players.size() > 0)
-    {
-        remove_remote_player_as_server(instance, disconnected_players.back());
-        disconnected_players.pop_back();
-    }
+    Game::program_state->server.remove_disconnected_clients();
 
-    // Update the in game level
-    Levels::step_level(instance->playing_level, time_step);
+    // All game input should have been read
+    // Record all of this frame's inputs
+    inputs = this_frames_inputs;
+
+    // Update the level using game input
+    Levels::step_level(inputs, playing_level, time_step);
 
     // Broadcast the players and game state
     {
         Serialization::Stream *game_stream = Serialization::make_stream();
-
-        // Send game state to each remote connection
-        for(const std::pair<PlayerID, Network::Connection *> &send_to : instance->server.remote_player_connections)
-        {
-            PlayerID send_to_player_id = send_to.first;
-            Network::Connection *send_to_connection = send_to.second;
-
-            // Serialize all players EXCEPT the client's self
-            // (the client should have a local player state)
-            int num_players = instance->players_state.all_players.size();
-            num_players -= 1; // Subtract one to account for not sending the client's self
-            game_stream->write(num_players);
-            for(const std::pair<PlayerID, Player *> &sending : instance->players_state.all_players)
-            {
-                PlayerID sending_player_id = sending.first;
-                Player *sending_player = sending.second;
-                // Skip Client's self
-                if(send_to_player_id == sending_player_id) continue;
-                // Write player ID
-                game_stream->write((int)sending_player_id);
-                // Write all player actions
-                for(int i = 0; i < (int)Players::Action::NUM_ACTIONS; i++)
-                {
-                    bool action = sending_player->current_actions[i];
-                    int value = (action == 0) ? false : true;
-                    game_stream->write(value);
-                }
-            }
-
-            Levels::serialize_level(game_stream, instance->playing_level);
-
-            send_to_connection->send_stream(game_stream);
-            game_stream->clear();
-        }
-
+        serialize_into(game_stream);
+        Game::program_state->server.broadcast_to_clients(game_stream);
         Serialization::free_stream(game_stream);
     }
 
 
 
     // Draw game
-    Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
-    Graphics::ImGuiImplementation::new_frame();
-    ImGui::Begin("Debug");
+    {
+        Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
+        Graphics::ImGuiImplementation::new_frame();
+        ImGui::Begin("Debug");
 
-    ImGui::Text("SERVER");
+        ImGui::Text("SERVER");
 
-    if(ImGui::Button("Switch to offline")) switch_network_mode(instance, GameState::NetworkMode::OFFLINE);
-    if(ImGui::Button("Switch to client"))  switch_network_mode(instance, GameState::NetworkMode::CLIENT);
+        if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
+        if(ImGui::Button("Switch to client"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
 
-    Levels::draw_level(instance->playing_level);
+        Levels::draw_level(playing_level);
 
-    GameConsole::draw();
+        GameConsole::draw();
 
-    ImGui::End();
-    Graphics::ImGuiImplementation::end_frame();
-    Graphics::swap_frames();
-
+        ImGui::End();
+        Graphics::ImGuiImplementation::end_frame();
+        Graphics::swap_frames();
+    }
 }
 
-static void do_one_step(GameState *instance, float time_step)
+void GameState::serialize_into(Serialization::Stream *stream)
 {
-    switch(instance->network_mode)
+    stream->write(frame_number);
+    stream->write((int)inputs.size());
+    for(GameInput &input : inputs)
     {
-        case GameState::NetworkMode::OFFLINE:
+        input.serialize_into(stream);
+    }
+    Levels::serialize_level(stream, playing_level);
+}
+
+void GameState::deserialize_from(Serialization::Stream *stream)
+{
+    stream->read(&frame_number);
+    int num_inputs;
+    stream->read(&num_inputs);
+    inputs.resize(num_inputs);
+    for(int i = 0; i < num_inputs; i++)
+    {
+        GameInput *target = &(inputs[i]);
+        target->deserialize_from(stream);
+    }
+    Levels::deserialize_level(stream, playing_level);
+}
+
+
+
+void ProgramState::Client::connect_to_server(const char *ip_address, int port)
+{
+    server_connection = Network::connect(ip_address, port);
+}
+
+void ProgramState::Client::disconnect_from_server()
+{
+    Network::disconnect(&server_connection);
+}
+
+
+
+void ProgramState::Server::startup(int port)
+{
+    Network::listen_for_client_connections(port);
+}
+
+void ProgramState::Server::shutdown()
+{
+    for(ClientConnection &client : client_connections)
+    {
+        Network::disconnect(&(client.connection));
+    }
+    client_connections.clear();
+    Network::stop_listening_for_client_connections();
+}
+
+void ProgramState::Server::add_client_connection(Network::Connection *connection)
+{
+    client_connections.push_back( {next_input_uid, connection} );
+    next_input_uid++;
+}
+
+void ProgramState::Server::remove_disconnected_clients()
+{
+    auto it = std::remove_if(client_connections.begin(), client_connections.end(),
+            [](const ClientConnection &client) { return client.connection == nullptr; }
+            );
+    client_connections.erase(it, client_connections.end());
+}
+
+void ProgramState::Server::broadcast_to_clients(Serialization::Stream *stream)
+{
+    for(ClientConnection &client : client_connections)
+    {
+        client.connection->send_stream(stream);
+    }
+}
+
+
+
+
+void ProgramState::do_one_step(float time_step)
+{
+    switch(network_mode)
+    {
+        case NetworkMode::OFFLINE:
         {
-            step_as_offline(instance, time_step);
+            current_game_state->step_as_offline(time_step);
             break;
         }
-        case GameState::NetworkMode::SERVER:
+        case NetworkMode::SERVER:
         {
-            step_as_server(instance, time_step);
+            current_game_state->step_as_server(time_step);
             break;
         }
-        case GameState::NetworkMode::CLIENT:
+        case NetworkMode::CLIENT:
         {
-            step_as_client(instance, time_step);
+            current_game_state->step_as_client(time_step);
             break;
         }
     }
 }
 
-static void shutdown_game(GameState *instance)
+void ProgramState::switch_network_mode(NetworkMode mode)
 {
-    switch(instance->network_mode)
+    if(mode == NetworkMode::OFFLINE)
     {
-        case GameState::NetworkMode::OFFLINE:
+        if(network_mode == NetworkMode::CLIENT)
+        {
+            client.disconnect_from_server();
+        }
+        if(network_mode == NetworkMode::SERVER)
+        {
+            server.shutdown();
+        }
+        network_mode = NetworkMode::OFFLINE;
+    }
+
+    if(mode == NetworkMode::CLIENT)
+    {
+        if(network_mode == NetworkMode::SERVER)
+        {
+            server.shutdown();
+        }
+        network_mode = NetworkMode::CLIENT;
+        client.server_connection = nullptr;
+    }
+
+    if(mode == NetworkMode::SERVER)
+    {
+        if(network_mode == NetworkMode::CLIENT)
+        {
+            client.disconnect_from_server();
+        }
+        network_mode = NetworkMode::SERVER;
+        server.startup(SERVER_PORT);
+    }
+}
+
+void ProgramState::shutdown()
+{
+    switch(network_mode)
+    {
+        case NetworkMode::OFFLINE:
         {
             break;
         }
 
-        case GameState::NetworkMode::CLIENT:
+        case NetworkMode::CLIENT:
         {
-            disconnect_client(instance);
+            client.disconnect_from_server();
             break;
         }
 
-        case GameState::NetworkMode::SERVER:
+        case NetworkMode::SERVER:
         {
-            disconnect_server(instance);
+            server.shutdown();
             break;
         }
     }
@@ -579,51 +515,17 @@ static void shutdown_game(GameState *instance)
     Graphics::ImGuiImplementation::shutdown();
 }
 
-static void init_game(GameState **p_instance)
+void ProgramState::init()
 {
-    GameState *&instance = *p_instance;
+    running = true;
+    seconds_since_last_step = 0.0;
+    last_loop_time = 0.0;
 
-    instance = new GameState;
+    network_mode = ProgramState::NetworkMode::OFFLINE;
 
-    instance->running = true;
-    instance->seconds_since_last_step = 0.0;
-    instance->last_loop_time = 0.0;
-
-    instance->network_mode = GameState::NetworkMode::OFFLINE;
-
-    instance->players_state.next_player_id = { 0 };
-
-    instance->num_levels = 1;
-    instance->levels = new Levels::Level *[instance->num_levels]();
-    for(int i = 0; i < instance->num_levels; i++)
-    {
-        instance->levels[i] = Levels::create_level();
-    }
-    instance->playing_level = instance->levels[0];
-
-
-    
-    // Add the local player
-    instance->players_state.local_player = 0;
-    instance->players_state.all_players[instance->players_state.local_player] = new Player();
-    Levels::add_avatar(instance->playing_level, instance->players_state.local_player);
-    instance->players_state.next_player_id = 1;
-}
-
-static void init_imgui()
-{
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-    
-    // Setup Dear ImGui style
-    ImGui::StyleColorsDark();
-    //ImGui::StyleColorsClassic();
-    
-    // Setup Platform/Renderer bindings
-    Graphics::ImGuiImplementation::init();
+    current_game_state = new GameState();
+    current_game_state->frame_number = 0;
+    current_game_state->playing_level = Levels::create_level();
 }
 
 
@@ -639,51 +541,50 @@ void Game::start()
     //seed_random(0);
     seed_random((int)(Platform::time_since_start() * 10000.0f));
 
-    init_game(&instance);
-    init_imgui();
+    program_state = new ProgramState();
+    program_state->init();
 
-    instance->last_loop_time = Platform::time_since_start();
-    while(instance->running)
+    program_state->last_loop_time = Platform::time_since_start();
+    while(program_state->running)
     {
         Platform::handle_os_events();
 
-        if(instance->running == false) break;
+        if(program_state->running == false) break;
 
         double this_loop_time = Platform::time_since_start();
-        double seconds_since_last_loop = this_loop_time - instance->last_loop_time;
-        instance->last_loop_time = this_loop_time;
-        instance->seconds_since_last_step += seconds_since_last_loop;
+        double seconds_since_last_loop = this_loop_time - program_state->last_loop_time;
+        program_state->last_loop_time = this_loop_time;
+        program_state->seconds_since_last_step += seconds_since_last_loop;
 
         // If the target step_seconds has passed since last step, do one step
-        if(instance->seconds_since_last_step >= GameState::TARGET_STEP_TIME)
+        if(program_state->seconds_since_last_step >= ProgramState::TARGET_STEP_TIME)
         {
             // You may have to update the engine more than once if more than one step time has passed
-            int num_steps_to_do = (int)(instance->seconds_since_last_step / GameState::TARGET_STEP_TIME);
+            int num_steps_to_do = (int)(program_state->seconds_since_last_step / ProgramState::TARGET_STEP_TIME);
 
-            if(num_steps_to_do <= GameState::MAX_STEPS_PER_LOOP)
+            if(num_steps_to_do <= ProgramState::MAX_STEPS_PER_LOOP)
             {
                 for(int i = 0; i < num_steps_to_do; i++)
                 {
                     // Move the engine forward in time by the target seconds
-                    do_one_step(instance, GameState::TARGET_STEP_TIME);
-
+                    program_state->do_one_step(ProgramState::TARGET_STEP_TIME);
                 }
 
                 // Reset the timer
-                instance->seconds_since_last_step -= GameState::TARGET_STEP_TIME * num_steps_to_do;
+                program_state->seconds_since_last_step -= ProgramState::TARGET_STEP_TIME * num_steps_to_do;
             }
             else
             {
                 // Determinism is broken due to long frame times
 
-                for(int i = 0; i < GameState::MAX_STEPS_PER_LOOP; i++)
+                for(int i = 0; i < ProgramState::MAX_STEPS_PER_LOOP; i++)
                 {
                     // Move the engine forward in time by the target seconds
-                    do_one_step(instance, GameState::TARGET_STEP_TIME);
+                    program_state->do_one_step(ProgramState::TARGET_STEP_TIME);
                 }
 
                 // Reset the timer
-                instance->seconds_since_last_step = 0.0f;
+                program_state->seconds_since_last_step = 0.0f;
             }
         }
         else
@@ -692,38 +593,11 @@ void Game::start()
         }
     }
 
-    shutdown_game(instance);
+    program_state->shutdown();
 }
 
 void Game::stop()
 {
-    instance->running = false;
+    program_state->running = false;
 }
-
-
-
-
-bool Players::action(PlayerID id, Action action)
-{
-    std::map<PlayerID, Player *>::iterator it = Game::instance->players_state.all_players.find(id);
-    if(it != Game::instance->players_state.all_players.end())
-    {
-        Player *player = it->second;
-        int index = (int)action;
-        return player->current_actions[index];
-    }
-
-    return false;
-}
-
-PlayerID Players::remote_to_local_player_id(PlayerID remote_id)
-{
-    std::map<PlayerID, PlayerID>::iterator it = Game::instance->client.remote_to_local_id_map.find(remote_id);
-    if(it == Game::instance->client.remote_to_local_id_map.end())
-    {
-        return -1;
-    }
-    return it->second;
-}
-
 

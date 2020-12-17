@@ -489,6 +489,8 @@ void Graphics::init()
         char bitmap[] = { (char)255, (char)255, (char)255, (char)255 };
         instance->white_texture = make_texture_from_bitmap(1, 1, bitmap);
     }
+
+    Graphics::ImGuiImplementation::init();
 }
 
 void Graphics::clear_frame(v4 color)
@@ -511,6 +513,17 @@ void Graphics::swap_frames()
 // ImGui Implementation
 void Graphics::ImGuiImplementation::init()
 {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    //io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    
+    // Setup Dear ImGui style
+    ImGui::StyleColorsDark();
+    //ImGui::StyleColorsClassic();
+    
+    // Setup Platform/Renderer bindings
     ImGui_ImplOpenGL3_Init("#version 440 core");
     ImGui_ImplWin32_Init(Windows::handle());
 }

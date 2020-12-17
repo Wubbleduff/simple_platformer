@@ -9,6 +9,7 @@
 #include "serialization.h"
 
 //#include "imgui.h"
+#include <map>
 #include <algorithm>
 
 
@@ -106,8 +107,6 @@ struct Grid
 
 struct Avatar
 {
-    PlayerID player_id;
-
     v2 position;
     v4 color;
 
@@ -129,20 +128,14 @@ struct Levels::Level
 {
     Grid grid;
 
-    std::vector<Avatar *> avatars;
+    //std::vector<Avatar *> avatars;
+    std::map<GameInput::UID, Avatar *> avatars;
+
+    //std::vector<Enemy *> enemies;
 };
 
 
 
-
-static Avatar *avatar_from_player_id(Levels::Level *level, PlayerID id)
-{
-    for(int i = 0; i < level->avatars.size(); i++)
-    {
-        if(level->avatars[i]->player_id == id) return level->avatars[i];
-    }
-    return nullptr;
-}
 
 static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
 {
@@ -272,10 +265,8 @@ static void check_and_resolve_collisions(Levels::Level *level, Avatar *avatar)
     }
 }
 
-static void init_avatar(Avatar *avatar, PlayerID id)
+static void init_avatar(Avatar *avatar)
 {
-    avatar->player_id = id;
-
     avatar->position = v2(2.0f, 4.0f);
     avatar->grounded = false;
 
@@ -291,14 +282,14 @@ static void init_avatar(Avatar *avatar, PlayerID id)
     avatar->color = random_color();
 }
 
-static void step_avatar(Avatar *avatar, Levels::Level *level, float dt)
+static void step_avatar(GameInput *input, Avatar *avatar, Levels::Level *level, float dt)
 {
     float horizontal_acceleration = 0.0f;
     float vertical_acceleration = 0.0f;
 
-    bool moving_right = Players::action(avatar->player_id, Players::Action::MOVE_RIGHT);
-    bool moving_left = Players::action(avatar->player_id, Players::Action::MOVE_LEFT);
-    bool jump = Players::action(avatar->player_id, Players::Action::JUMP);
+    bool moving_right = input->action(GameInput::Action::MOVE_RIGHT);
+    bool moving_left = input->action(GameInput::Action::MOVE_LEFT);
+    bool jump = input->action(GameInput::Action::JUMP);
 
     if(moving_right)
     {
@@ -356,26 +347,66 @@ Levels::Level *Levels::create_level()
     return level;
 }
 
-void Levels::add_avatar(Level *level, PlayerID id)
+static Avatar *add_avatar(Levels::Level *level, GameInput::UID id)
 {
     Avatar *new_avatar = new Avatar();
-    init_avatar(new_avatar, id);
-    level->avatars.push_back(new_avatar);
+    init_avatar(new_avatar);
+    level->avatars[id] = new_avatar;
+
+    return new_avatar;
 }
 
-void Levels::remove_avatar(Level *level, PlayerID id)
+static GameInput *get_input(GameInputList *inputs, GameInput::UID uid)
 {
-    std::vector<Avatar *>::iterator it = std::find_if(level->avatars.begin(), level->avatars.end(),
-        [&](const Avatar *other) { return id == other->player_id; }
-    );
-    level->avatars.erase(it);
-}
-
-void Levels::step_level(Level *level, float dt)
-{
-    for(Avatar *avatar : level->avatars)
+    for(int i = 0; i < inputs->size(); i++)
     {
-        step_avatar(avatar,level,dt);
+        if((*inputs)[i].uid == uid)
+        {
+            return &(*inputs)[i];
+        }
+    }
+}
+
+void remove_avatar(Levels::Level *level, GameInput::UID id)
+{
+    //std::vector<Avatar *>::iterator it = std::find_if(level->avatars.begin(), level->avatars.end(),
+    //    [&](const Avatar *other) { return id == other->player_id; }
+    //);
+    //level->avatars.erase(it);
+}
+
+void Levels::step_level(GameInputList inputs, Level *level, float dt)
+{
+    // BRAINDEAD PASTE
+    // I don't know how to nicely match game inputs with avatars
+    for(GameInput &input : inputs)
+    {
+        auto it = level->avatars.find(input.uid);
+        if(it == level->avatars.end())
+        {
+            add_avatar(level, input.uid);
+        }
+    }
+    std::vector<GameInput::UID> uids_to_remove;
+    for(const std::pair<GameInput::UID, Avatar *> &pair : level->avatars)
+    {
+        auto it = std::find_if(inputs.begin(), inputs.end(), [&](const GameInput &input) { return input.uid == pair.first; });
+        if(it == inputs.end())
+        {
+            uids_to_remove.push_back(pair.first);
+        }
+    }
+    while(uids_to_remove.size() > 0)
+    {
+        level->avatars.erase(uids_to_remove.back());
+        uids_to_remove.pop_back();
+    }
+
+    for(const std::pair<GameInput::UID, Avatar *> &pair : level->avatars)
+    {
+        GameInput *input = get_input(&inputs, pair.first);
+        Avatar *avatar = pair.second;
+        step_avatar(input, avatar, level, dt);
     }
 }
 
@@ -386,8 +417,9 @@ void Levels::draw_level(Level *level)
     Graphics::set_camera_position(v2() + camera_offset);
 
     // Draw the players
-    for(Avatar *avatar : level->avatars)
+    for(const std::pair<GameInput::UID, Avatar *> &pair : level->avatars)
     {
+        Avatar *avatar = pair.second;
         draw_avatar(avatar);
     }
 
@@ -415,10 +447,12 @@ void Levels::draw_level(Level *level)
 void Levels::serialize_level(Serialization::Stream *stream, Level *level)
 {
     stream->write((int)level->avatars.size());
-    for(int i = 0; i < level->avatars.size(); i++)
+    for(const std::pair<GameInput::UID, Avatar *> &pair : level->avatars)
     {
-        Avatar *avatar = level->avatars[i];
-        stream->write(avatar->player_id);
+        GameInput::UID uid = pair.first;
+        Avatar *avatar = pair.second;
+
+        stream->write(uid);
         stream->write(avatar->position);
         stream->write(avatar->color);
     }
@@ -428,14 +462,44 @@ void Levels::deserialize_level(Serialization::Stream *stream, Level *level)
 {
     int num_avatars;
     stream->read(&num_avatars);
+    std::vector<GameInput::UID> uids_seen;
     for(int i = 0; i < num_avatars; i++)
     {
-        PlayerID remote_id;
-        stream->read((int *)&remote_id);
-        PlayerID local_id = Players::remote_to_local_player_id(remote_id);
-        Avatar *avatar = avatar_from_player_id(level, local_id);
+        GameInput::UID uid;
+        stream->read((int *)&uid);
+        uids_seen.push_back(uid);
+
+        Avatar *avatar = nullptr;
+        auto it = level->avatars.find(uid);
+        if(it == level->avatars.end())
+        {
+            avatar = add_avatar(level, uid);
+        }
+        else
+        {
+            avatar = it->second;
+        }
         stream->read(&avatar->position);
         stream->read(&avatar->color);
+    }
+
+
+
+    // Remove "dangling" avatars
+    // BRAINDEAD FIX TOO
+    std::vector<GameInput::UID> uids_to_remove;
+    for(const std::pair<GameInput::UID, Avatar *> &pair : level->avatars)
+    {
+        auto it = std::find_if(uids_seen.begin(), uids_seen.end(), [&](const GameInput::UID &other_uid) { return other_uid == pair.first; });
+        if(it == uids_seen.end())
+        {
+            uids_to_remove.push_back(pair.first);
+        }
+    }
+    while(uids_to_remove.size() > 0)
+    {
+        level->avatars.erase(uids_to_remove.back());
+        uids_to_remove.pop_back();
     }
 }
 

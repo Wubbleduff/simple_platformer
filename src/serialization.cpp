@@ -125,6 +125,10 @@ void Serialization::Stream::write(int item)
 {
     write_stream_t(this, item);
 }
+void Serialization::Stream::write(unsigned int item)
+{
+    write_stream_t(this, item);
+}
 void Serialization::Stream::write(float item)
 {
     write_stream_t(this, item);
@@ -151,6 +155,10 @@ void Serialization::Stream::read(char *item)
     read_stream_t(this, item);
 }
 void Serialization::Stream::read(int *item)
+{
+    read_stream_t(this, item);
+}
+void Serialization::Stream::read(unsigned int *item)
 {
     read_stream_t(this, item);
 }

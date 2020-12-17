@@ -4,9 +4,18 @@
 #include "network.h"
 #include <vector>
 
-typedef int PlayerID;
-struct Players
+struct Game
 {
+    static struct ProgramState *program_state;
+
+    static void start();
+    static void stop();
+};
+
+struct GameInput
+{
+    typedef unsigned int UID;
+    UID uid;
     enum class Action
     {
         MOVE_RIGHT,
@@ -16,16 +25,13 @@ struct Players
         NUM_ACTIONS
     };
 
-    static bool action(PlayerID id, Action action);
-    static PlayerID remote_to_local_player_id(PlayerID remote_id);
+    bool current_actions[(int)Action::NUM_ACTIONS] = {};
+
+    bool action(Action action);
+    void read_from_local();
+    void read_from_connection(Network::Connection **connection);
+    void serialize_into(Serialization::Stream *stream);
+    void deserialize_from(Serialization::Stream *stream);
 };
-
-struct Game
-{
-    static struct GameState *instance;
-
-    static void start();
-    static void stop();
-};
-
+typedef std::vector<GameInput> GameInputList;
 

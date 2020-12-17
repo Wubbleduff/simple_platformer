@@ -20,6 +20,7 @@ struct Serialization
         void clear();
         void write(char item);
         void write(int item);
+        void write(unsigned int item);
         void write(float item);
         void write(GameMath::v2 item);
         void write(GameMath::v3 item);
@@ -27,6 +28,7 @@ struct Serialization
         void write_array(int num, char *array);
         void read(char *item);
         void read(int *item);
+        void read(unsigned int *item);
         void read(float *item);
         void read(GameMath::v2 *item);
         void read(GameMath::v3 *item);
