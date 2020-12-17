@@ -106,7 +106,7 @@ struct Grid
 
 struct Avatar
 {
-    Game::PlayerID player_id;
+    PlayerID player_id;
 
     v2 position;
     v4 color;
@@ -262,7 +262,7 @@ static void check_and_resolve_collisions(Levels::Level *level, Avatar *avatar)
     }
 }
 
-static void init_avatar(Avatar *avatar, Game::PlayerID id)
+static void init_avatar(Avatar *avatar, PlayerID id)
 {
     avatar->player_id = id;
 
@@ -286,9 +286,9 @@ static void step_avatar(Avatar *avatar, Levels::Level *level, float dt)
     float horizontal_acceleration = 0.0f;
     float vertical_acceleration = 0.0f;
 
-    bool moving_right = Game::Players::action(avatar->player_id, Game::Players::Action::MOVE_RIGHT);
-    bool moving_left = Game::Players::action(avatar->player_id, Game::Players::Action::MOVE_LEFT);
-    bool jump = Game::Players::action(avatar->player_id, Game::Players::Action::JUMP);
+    bool moving_right = Players::action(avatar->player_id, Players::Action::MOVE_RIGHT);
+    bool moving_left = Players::action(avatar->player_id, Players::Action::MOVE_LEFT);
+    bool jump = Players::action(avatar->player_id, Players::Action::JUMP);
 
     if(moving_right)
     {
@@ -346,14 +346,14 @@ Levels::Level *Levels::create_level()
     return level;
 }
 
-void Levels::add_avatar(Level *level, Game::PlayerID id)
+void Levels::add_avatar(Level *level, PlayerID id)
 {
     Avatar *new_avatar = new Avatar();
     init_avatar(new_avatar, id);
     level->avatars.push_back(new_avatar);
 }
 
-void Levels::remove_avatar(Level *level, Game::PlayerID id)
+void Levels::remove_avatar(Level *level, PlayerID id)
 {
     std::vector<Avatar *>::iterator it = std::find_if(level->avatars.begin(), level->avatars.end(),
         [&](const Avatar *other) { return id == other->player_id; }
@@ -404,7 +404,12 @@ void Levels::draw_level(Level *level)
 
 void Levels::serialize_level(Serialization::Stream *stream, Level *level)
 {
-    
+    stream->write((int)level->avatars.size());
+    for(int i = 0; i < level->avatars.size(); i++)
+    {
+        Avatar *avatar = level->avatars[i];
+        stream->write();
+    }
 }
 
 void Levels::deserialize_level(Serialization::Stream *stream, Level *level)

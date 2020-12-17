@@ -10,8 +10,8 @@ struct Levels
 
     static Level *create_level();
 
-    static void add_avatar(Level *level, Game::PlayerID id);
-    static void remove_avatar(Level *level, Game::PlayerID id);
+    static void add_avatar(Level *level, PlayerID id);
+    static void remove_avatar(Level *level, PlayerID id);
 
     static void step_level(Level *level, float dt);
     static void draw_level(Level *level);
