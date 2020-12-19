@@ -4,13 +4,7 @@
 #include "network.h"
 #include <vector>
 
-struct Game
-{
-    static struct ProgramState *program_state;
 
-    static void start();
-    static void stop();
-};
 
 struct GameInput
 {
@@ -34,4 +28,14 @@ struct GameInput
     void deserialize_from(Serialization::Stream *stream);
 };
 typedef std::vector<GameInput> GameInputList;
+
+struct Game
+{
+    static struct ProgramState *program_state;
+
+    static void start();
+    static void stop();
+
+    static GameInput::UID get_my_uid();
+};
 

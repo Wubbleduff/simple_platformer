@@ -12,6 +12,8 @@
 #define CODE_WOULD_BLOCK WSAEWOULDBLOCK
 #define CODE_IS_CONNECTED WSAEISCONN
 #define CODE_INVALID WSAEINVAL
+#define CODE_ALREADY WSAEALREADY
+#define CODE_ISCONN WSAEISCONN
 
 enum BlockingMode
 {
@@ -108,7 +110,7 @@ Network::Connection *Network::connect(const char *ip_address, int port)
         return nullptr;
     }
 
-    set_blocking_mode(new_socket, BLOCKING);
+    set_blocking_mode(new_socket, NONBLOCKING);
 
     // Create address
     sockaddr_in address = {};
@@ -125,25 +127,26 @@ Network::Connection *Network::connect(const char *ip_address, int port)
     int code = ::connect(new_socket, (sockaddr *)(&address), sizeof(address));
     int status = get_last_error();
 
-    // While not connected, try to reconnect
-    while(code != 0 && status != CODE_IS_CONNECTED)
-    {
-        code = ::connect(new_socket, (sockaddr *)(&address), sizeof(address));
-        status = get_last_error();
+    Connection *new_connection = Network::Connection::allocate_and_init_connection(new_socket, ip_address, port);
+    new_connection->connected = false;
 
-        if(status == CODE_INVALID)
+    if(code == SOCKET_ERROR)
+    {
+        // Didn't connect immediately
+        if(status != CODE_WOULD_BLOCK)
         {
-            error = CODE_INVALID;
-            Log::log_error("Could not connect to %s:%i", ip_address, port);
+            // There was an actual error
+            Log::log_error("Error creating connection: %i", status);
             return nullptr;;
         }
     }
+    else
+    {
+        // Connected immediately
+        new_connection->connected = true;
+        Log::log_info("Connected to server %s:%i", ip_address, port);
+    }
 
-    set_blocking_mode(new_socket, NONBLOCKING);
-
-    Connection *new_connection = Network::Connection::allocate_and_init_connection(new_socket, ip_address, port);
-
-    Log::log_info("Connected to server %s:%i", ip_address, port);
     return new_connection;
 }
 
@@ -180,14 +183,14 @@ void Network::disconnect(Network::Connection **connection)
     *connection = nullptr;
 }
 
-void Network::listen_for_client_connections(int port)
+bool Network::listen_for_client_connections(int port)
 {
     // Create a listening socket
     SOCKET listening_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if(listening_socket == INVALID_SOCKET)
     {
         Log::log_error("Couldn't create listening socket: %d\n", get_last_error());
-        return;
+        return false;
     }
 
     set_blocking_mode(listening_socket, NONBLOCKING);
@@ -202,14 +205,14 @@ void Network::listen_for_client_connections(int port)
     {
         error = get_last_error();
         Log::log_error("Couldn't bind listening socket to port: %d, error: %d\n", port, error);
-        return;
+        return false;
     }
 
     error = listen(listening_socket, SOMAXCONN);
     if(error == SOCKET_ERROR)
     {
         Log::log_error("Couldn't listen on the created socket: %d\n", get_last_error());
-        return;
+        return false;
     }
 
     instance->listening_socket = listening_socket;
@@ -324,6 +327,51 @@ Network::ReadResult Network::Connection::read_into_stream(Serialization::Stream 
     {
         return Network::ReadResult::NOT_READY;
     }
+}
+
+bool Network::Connection::is_connected()
+{
+    return connected;
+}
+
+bool Network::Connection::check_on_connection_status()
+{
+    if(connected) return true;
+
+    // Create address
+    sockaddr_in address = {};
+    address.sin_family = AF_INET;
+    address.sin_port = htons((unsigned short)port);
+    int error = inet_pton(AF_INET, ip_address, &address.sin_addr.s_addr);
+    if(error == -1)
+    {
+        Log::log_error("Error creating an address: %i\n", error);
+        return false;
+    }
+
+    // Try to connect
+    int code = ::connect(tcp_socket, (sockaddr *)(&address), sizeof(address));
+    int status = get_last_error();
+
+    if(code == SOCKET_ERROR)
+    {
+        if(status != CODE_WOULD_BLOCK && status != CODE_ALREADY && status != CODE_ISCONN)
+        {
+            // There was an actual error
+            Log::log_error("Could not connect to server %s:%i, error: %i", ip_address, port, status);
+            return false;;
+        }
+
+        if(status == CODE_ISCONN)
+        {
+            // Connected
+            connected = true;
+            Log::log_info("Connected to server %s:%i", ip_address, port);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 

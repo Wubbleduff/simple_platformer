@@ -347,6 +347,13 @@ Levels::Level *Levels::create_level()
     return level;
 }
 
+void Levels::destroy_level(Level *level)
+{
+    if(level == nullptr) return;
+    delete [] level->grid.cells;
+    delete level;
+}
+
 static Avatar *add_avatar(Levels::Level *level, GameInput::UID id)
 {
     Avatar *new_avatar = new Avatar();
@@ -413,8 +420,16 @@ void Levels::step_level(GameInputList inputs, Level *level, float dt)
 void Levels::draw_level(Level *level)
 {
     v2 camera_offset = v2(16.0f, 4.0f);
+
+    GameInput::UID my_uid = Game::get_my_uid();
+    auto focus_avatar_it = level->avatars.find(my_uid);
+    if(focus_avatar_it != level->avatars.end())
+    {
+        Avatar *focus_avatar = focus_avatar_it->second;
+        Graphics::set_camera_position(focus_avatar->position + camera_offset);
+    }
     Graphics::set_camera_width(64.0f);
-    Graphics::set_camera_position(v2() + camera_offset);
+    
 
     // Draw the players
     for(const std::pair<GameInput::UID, Avatar *> &pair : level->avatars)

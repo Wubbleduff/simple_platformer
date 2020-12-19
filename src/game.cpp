@@ -26,6 +26,7 @@ using namespace GameMath;
 
 struct GameState
 {
+    GameInput::UID my_uid;
     unsigned int frame_number;
     std::vector<GameInput> inputs;
     Levels::Level *playing_level;
@@ -33,7 +34,8 @@ struct GameState
     void step_as_offline(float time_step);
     void step_as_client(float time_step);
     void step_as_server(float time_step);
-    void serialize_into(Serialization::Stream *stream);
+    void reset_to_default();
+    void serialize_into(Serialization::Stream *stream, GameInput::UID uid);
     void deserialize_from(Serialization::Stream *stream);
 };
 
@@ -41,6 +43,7 @@ struct ProgramState
 {
     static const double TARGET_STEP_TIME;
     static const int MAX_STEPS_PER_LOOP;
+
     bool running;
     double seconds_since_last_step;
     double last_loop_time;
@@ -59,6 +62,8 @@ struct ProgramState
 
         void connect_to_server(const char *ip_address, int port);
         void disconnect_from_server();
+        bool is_connected();
+        void update_connection();
     } client;
 
     struct Server
@@ -71,11 +76,10 @@ struct ProgramState
         std::vector<ClientConnection> client_connections;
         GameInput::UID next_input_uid = 1;
 
-        void startup(int port);
+        bool startup(int port);
         void shutdown();
         void add_client_connection(Network::Connection *connection);
         void remove_disconnected_clients();
-        void broadcast_to_clients(Serialization::Stream *stream);
     } server;
 
     GameState *current_game_state;
@@ -154,6 +158,7 @@ void GameInput::read_from_connection(Network::Connection **connection)
 
 void GameState::step_as_offline(float time_step)
 {
+    my_uid = 0;
     frame_number++;
 
     Platform::Input::read_input();
@@ -190,9 +195,11 @@ void GameState::step_as_offline(float time_step)
 
 void GameState::step_as_client(float time_step)
 {
+    Game::program_state->client.update_connection();
+
     // Send the local player's input to the server
     Platform::Input::read_input();
-    if(Game::program_state->client.server_connection)
+    if(Game::program_state->client.is_connected())
     {
         Serialization::Stream *input_stream = Serialization::make_stream();
 
@@ -211,7 +218,7 @@ void GameState::step_as_client(float time_step)
 #endif
 
     // Read server's game state
-    if(Game::program_state->client.server_connection)
+    if(Game::program_state->client.is_connected())
     {
         Serialization::Stream *game_stream = Serialization::make_stream();
         Network::ReadResult result = Game::program_state->client.server_connection->read_into_stream(game_stream);
@@ -253,24 +260,30 @@ void GameState::step_as_client(float time_step)
         if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
         if(ImGui::Button("Switch to server"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
 
+        bool game_state_still_valid = true;
         static char address_string[16] = "127.0.0.1";
         ImGui::InputText("Address", address_string, sizeof(address_string), 0);
-        if(Game::program_state->client.server_connection == nullptr)
+        if(Game::program_state->client.is_connected())
         {
+            if(ImGui::Button("Disconnect from server"))
+            {
+                Game::program_state->client.disconnect_from_server();
+                game_state_still_valid = false;
+            }
+        }
+        else
+        {
+            
             if(ImGui::Button("Connect to server"))
             {
                 Game::program_state->client.connect_to_server(address_string, SERVER_PORT);
             }
         }
-        else
-        {
-            if(ImGui::Button("Disconnect from server"))
-            {
-                Game::program_state->client.disconnect_from_server();
-            }
-        }
 
-        Levels::draw_level(playing_level);
+        if(game_state_still_valid)
+        {
+            Levels::draw_level(playing_level);
+        }
 
         GameConsole::draw();
 
@@ -282,6 +295,7 @@ void GameState::step_as_client(float time_step)
 
 void GameState::step_as_server(float time_step)
 {
+    my_uid = 0;
     frame_number++;
 
     // Accept new connections to the server
@@ -325,8 +339,12 @@ void GameState::step_as_server(float time_step)
     // Broadcast the players and game state
     {
         Serialization::Stream *game_stream = Serialization::make_stream();
-        serialize_into(game_stream);
-        Game::program_state->server.broadcast_to_clients(game_stream);
+        for(ProgramState::Server::ClientConnection &client : Game::program_state->server.client_connections)
+        {
+            serialize_into(game_stream, client.uid);
+            client.connection->send_stream(game_stream);
+            game_stream->clear();
+        }
         Serialization::free_stream(game_stream);
     }
 
@@ -353,8 +371,19 @@ void GameState::step_as_server(float time_step)
     }
 }
 
-void GameState::serialize_into(Serialization::Stream *stream)
+void GameState::reset_to_default()
 {
+    my_uid = 0;
+    frame_number = 0;
+    inputs.clear();
+
+    Levels::destroy_level(playing_level);
+    playing_level = Levels::create_level();
+}
+
+void GameState::serialize_into(Serialization::Stream *stream, GameInput::UID other_uid)
+{
+    stream->write(other_uid);
     stream->write(frame_number);
     stream->write((int)inputs.size());
     for(GameInput &input : inputs)
@@ -366,6 +395,7 @@ void GameState::serialize_into(Serialization::Stream *stream)
 
 void GameState::deserialize_from(Serialization::Stream *stream)
 {
+    stream->read(&my_uid);
     stream->read(&frame_number);
     int num_inputs;
     stream->read(&num_inputs);
@@ -388,13 +418,27 @@ void ProgramState::Client::connect_to_server(const char *ip_address, int port)
 void ProgramState::Client::disconnect_from_server()
 {
     Network::disconnect(&server_connection);
+    Game::program_state->current_game_state->reset_to_default();
+}
+bool ProgramState::Client::is_connected()
+{
+    if(server_connection == nullptr) return false;
+    return server_connection->is_connected();
+}
+
+void ProgramState::Client::update_connection()
+{
+    if(server_connection == nullptr) return;
+    server_connection->check_on_connection_status();
 }
 
 
 
-void ProgramState::Server::startup(int port)
+
+bool ProgramState::Server::startup(int port)
 {
-    Network::listen_for_client_connections(port);
+    bool success = Network::listen_for_client_connections(port);
+    return success;
 }
 
 void ProgramState::Server::shutdown()
@@ -405,6 +449,7 @@ void ProgramState::Server::shutdown()
     }
     client_connections.clear();
     Network::stop_listening_for_client_connections();
+    Log::log_info("Server shutdown");
 }
 
 void ProgramState::Server::add_client_connection(Network::Connection *connection)
@@ -419,14 +464,6 @@ void ProgramState::Server::remove_disconnected_clients()
             [](const ClientConnection &client) { return client.connection == nullptr; }
             );
     client_connections.erase(it, client_connections.end());
-}
-
-void ProgramState::Server::broadcast_to_clients(Serialization::Stream *stream)
-{
-    for(ClientConnection &client : client_connections)
-    {
-        client.connection->send_stream(stream);
-    }
 }
 
 
@@ -485,8 +522,11 @@ void ProgramState::switch_network_mode(NetworkMode mode)
         {
             client.disconnect_from_server();
         }
-        network_mode = NetworkMode::SERVER;
-        server.startup(SERVER_PORT);
+        bool success = server.startup(SERVER_PORT);
+        if(success)
+        {
+            network_mode = NetworkMode::SERVER;
+        }
     }
 }
 
@@ -524,8 +564,7 @@ void ProgramState::init()
     network_mode = ProgramState::NetworkMode::OFFLINE;
 
     current_game_state = new GameState();
-    current_game_state->frame_number = 0;
-    current_game_state->playing_level = Levels::create_level();
+    current_game_state->reset_to_default();
 }
 
 
@@ -575,8 +614,7 @@ void Game::start()
             }
             else
             {
-                // Determinism is broken due to long frame times
-
+                // Frame took too long
                 for(int i = 0; i < ProgramState::MAX_STEPS_PER_LOOP; i++)
                 {
                     // Move the engine forward in time by the target seconds
@@ -599,5 +637,10 @@ void Game::start()
 void Game::stop()
 {
     program_state->running = false;
+}
+
+GameInput::UID Game::get_my_uid()
+{
+    return program_state->current_game_state->my_uid;
 }
 

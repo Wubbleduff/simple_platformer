@@ -9,6 +9,7 @@ struct Levels
     struct Level;
 
     static Level *create_level();
+    static void destroy_level(Level *level);
 
     static void step_level(GameInputList inputs, Level *level, float dt);
     static void draw_level(Level *level);

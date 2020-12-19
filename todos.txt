@@ -1,0 +1,6 @@
+
+* 10 Add timeout on server connect from client
+* 8  Add different kinds of game states (main menu, an UI, playing level, etc)
+* 5  Have player data persistence using some form of identification
+* 3  Do client side prediction
+* 2  Allow for headless server

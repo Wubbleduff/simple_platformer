@@ -20,6 +20,9 @@ struct Network
     struct Connection
     {
     public:
+        bool is_connected();
+        // Check if still trying to connect to a server
+        bool check_on_connection_status();
         void send_stream(Serialization::Stream *stream);
         ReadResult read_into_stream(Serialization::Stream *stream);
 
@@ -63,7 +66,7 @@ struct Network
     static Connection *connect(const char *ip_address, int port);
     static void disconnect(Connection **connection);
 
-    static void listen_for_client_connections(int port);
+    static bool listen_for_client_connections(int port);
     static void stop_listening_for_client_connections();
     static std::vector<Connection *> accept_client_connections();
 };
