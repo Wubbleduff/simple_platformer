@@ -156,26 +156,29 @@ void Network::disconnect(Network::Connection **connection)
 
     set_blocking_mode((*connection)->tcp_socket, BLOCKING);
 
-    int result = ::shutdown((*connection)->tcp_socket, SD_SEND);
-    if(result == SOCKET_ERROR)
+    if((*connection)->connected)
     {
-        Log::log_error("Could not send shutdown signal");
-    }
+        int result = ::shutdown((*connection)->tcp_socket, SD_SEND);
+        if(result == SOCKET_ERROR)
+        {
+            Log::log_error("Could not send shutdown signal");
+        }
 
-    // TODO: Have a timeout period
-    static char buf[1024];
-    while(true)
-    {
-        int received_bytes = 0;
-        bool success = read_bytes_from_socket((*connection)->tcp_socket,
-                buf, sizeof(buf), &received_bytes);
-        if(!success) break;
-        if(success && received_bytes == 0) break;
+        // TODO: Have a timeout period
+        static char buf[1024];
+        while(true)
+        {
+            int received_bytes = 0;
+            bool success = read_bytes_from_socket((*connection)->tcp_socket,
+                    buf, sizeof(buf), &received_bytes);
+            if(!success) break;
+            if(success && received_bytes == 0) break;
+        }
+
+        Log::log_info("Disconnected from %s:%i", (*connection)->ip_address, (*connection)->port);
     }
 
     closesocket((*connection)->tcp_socket);
-
-    Log::log_info("Disconnected from %s:%i", (*connection)->ip_address, (*connection)->port);
 
     //delete (*connection)->recorded_frames;
     delete[] (*connection)->receive_buffer;

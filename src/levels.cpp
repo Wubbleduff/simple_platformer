@@ -415,6 +415,14 @@ void Levels::step_level(GameInputList inputs, Level *level, float dt)
         Avatar *avatar = pair.second;
         step_avatar(input, avatar, level, dt);
     }
+
+    // Check local input for menus
+    // This is assuming that the platform input has been read at this point
+    if(Platform::Input::key_down('M'))
+    {
+        Game::exit_to_main_menu();
+        return;
+    }
 }
 
 void Levels::draw_level(Level *level)
