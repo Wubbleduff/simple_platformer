@@ -221,6 +221,7 @@ bool Network::listen_for_client_connections(int port)
     instance->listening_socket = listening_socket;
 
     Log::log_info("Server listening on port %i...", port);
+    return true;
 }
 
 void Network::stop_listening_for_client_connections()

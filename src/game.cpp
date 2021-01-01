@@ -35,19 +35,6 @@ using namespace GameMath;
 // The different game states should use the same UI tools for drawing UI
 struct MenuState
 {
-    struct Button
-    {
-        v2 position;
-        v2 full_extents;
-        v4 color;
-
-        void (*on_click)(void) = nullptr;
-    };
-
-    std::vector<Button *> buttons;
-
-
-
     void step(float time_step);
     void draw();
     void cleanup();
@@ -71,7 +58,7 @@ struct GameState
     std::vector<GameInput> inputs_this_frame;
 
     MenuState *menu_state;        // For main menu, win/lose screen, etc. (What about pause menu? idk...)
-    Levels::Level *playing_level; // For when the player is playing the game
+    Level *playing_level; // For when the player is playing the game
 
     void step(std::vector<GameInput> *inputs, GameInput::UID focus_uid, float time_step);
     void draw();
@@ -252,7 +239,7 @@ void GameState::step(std::vector<GameInput> *inputs, GameInput::UID focus_uid, f
             menu_state->step(time_step);
             break;
         case Mode::PLAYING_LEVEL:
-            Levels::step_level(inputs_this_frame, playing_level, time_step);
+            playing_level->step(inputs_this_frame, time_step);
             break;
     }
 }
@@ -265,14 +252,14 @@ void GameState::draw()
         menu_state->draw();
         break;
     case Mode::PLAYING_LEVEL:
-        Levels::draw_level(playing_level);
+        playing_level->draw();
         break;
     }
 }
 
 void GameState::serialize_into(Serialization::Stream *stream, GameInput::UID other_uid)
 {
-    assert(current_mode == PLAYING_LEVEL, "Need to be in a level to serialize game state!");
+    assert(current_mode == PLAYING_LEVEL);
 
     stream->write(other_uid);
     stream->write(frame_number);
@@ -281,12 +268,12 @@ void GameState::serialize_into(Serialization::Stream *stream, GameInput::UID oth
     {
         input.serialize_into(stream);
     }
-    Levels::serialize_level(stream, playing_level);
+    playing_level->serialize(stream);
 }
 
 void GameState::deserialize_from(Serialization::Stream *stream)
 {
-    assert(current_mode == PLAYING_LEVEL, "Need to be in a level to deserialize game state!");
+    assert(current_mode == PLAYING_LEVEL);
 
     stream->read(&my_uid);
     stream->read(&frame_number);
@@ -298,7 +285,7 @@ void GameState::deserialize_from(Serialization::Stream *stream)
         GameInput *target = &(inputs_this_frame[i]);
         target->deserialize_from(stream);
     }
-    Levels::deserialize_level(stream, playing_level);
+    playing_level->deserialize(stream);
 }
 
 
@@ -308,33 +295,12 @@ void GameState::switch_game_mode(GameState::Mode mode)
     next_mode = mode;
 }
 
-// TODO: Move these somewhere nice :)
-static void start_clicked() { Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL); }
-static void stop_clicked()
-{
-    Game::stop();
-}
 void GameState::init_for_main_menu(bool initting)
 {
     if(initting)
     {
         // Initialize state for menu
         menu_state = new MenuState();
-
-        MenuState::Button *start_button = new MenuState::Button();
-        start_button->position = v2(-1.0f, 0.0f);
-        start_button->full_extents = v2(1.0f, 1.0f);
-        start_button->color = v4(0.0f, 1.0f, 0.0f, 1.0f);
-        start_button->on_click = start_clicked;
-
-        MenuState::Button *quit_button = new MenuState::Button();
-        quit_button->position = v2(1.0f, 0.0f);
-        quit_button->full_extents = v2(1.0f, 1.0f);
-        quit_button->color = v4(1.0f, 0.0f, 0.0f, 1.0f);
-        quit_button->on_click = stop_clicked;
-
-        menu_state->buttons.push_back(start_button);
-        menu_state->buttons.push_back(quit_button);
     }
     else
     {
@@ -353,11 +319,11 @@ void GameState::init_for_playing_level(bool initting)
         my_uid = 0;
         frame_number = 0;
         inputs_this_frame.clear();
-        playing_level = Levels::create_level();
+        playing_level = create_level();
     }
     else
     {
-        Levels::destroy_level(playing_level);
+        destroy_level(playing_level);
         playing_level = nullptr;
         Log::log_info("Shut down playing level");
     }
@@ -365,53 +331,24 @@ void GameState::init_for_playing_level(bool initting)
 
 void MenuState::step(float time_step)
 {
-    // Update each button's state
-    v2 mouse_position = Platform::Input::mouse_world_position();
-    for(Button *button : buttons)
-    {
-        v2 button_bl = button->position - button->full_extents * 0.5f;
-        v2 button_tr = button->position + button->full_extents * 0.5f;
-        
-        // Check if player is hovering the button
-        if(mouse_position.x >= button_bl.x &&
-           mouse_position.x <= button_tr.x &&
-           mouse_position.y >= button_bl.y &&
-           mouse_position.y <= button_tr.y)
-        {
-            // If the mouse is clicked
-            if(Platform::Input::mouse_button_down(0))
-            {
-                // Activate the button
-                button->on_click();
-            }
-
-            // Highlight
-            button->color.a = 1.0f;
-        }
-        else
-        {
-            // Un-highlight
-            button->color.a = 0.5f;
-        }
-    }
 }
 
 void MenuState::draw()
 {
-    // Draw the menu
-    // TODO: Separate UI and world space drawing
-    Graphics::set_camera_position(v2());
-    Graphics::set_camera_width(10.0f);
-    for(Button *button : buttons)
+    ImGui::Begin("Main Menu");
+    if(ImGui::Button("Start Game"))
     {
-        Graphics::draw_quad(button->position, button->full_extents, 0.0f, button->color);
+        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
     }
+    if(ImGui::Button("Quit Game"))
+    {
+        Game::stop();
+    }
+    ImGui::End();
 }
 
 void MenuState::cleanup()
 {
-    for(Button *button : buttons) delete button;
-    buttons.clear();
 }
 
 
