@@ -34,9 +34,12 @@ struct Serialization
         void read(GameMath::v3 *item);
         void read(GameMath::v4 *item);
         void read_array(int num, char *array);
+
+        void write_to_file(const char *path);
     };
 
     static Stream *make_stream(int capacity = 1);
+    static Stream *make_stream_from_file(const char *path);
     static void free_stream(Stream *stream);
 };
 

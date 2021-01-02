@@ -56,6 +56,7 @@ static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
 
 void Level::Grid::init(int w, int h)
 {
+    delete[] cells;
     width = w;
     height = h;
     cells = new Cell[w * h];
@@ -303,6 +304,14 @@ void Level::serialize(Serialization::Stream *stream)
         stream->write(avatar->position);
         stream->write(avatar->color);
     }
+
+    stream->write(grid.width);
+    stream->write(grid.height);
+    for(int i = 0; i < grid.width * grid.height; i++)
+    {
+        int value = grid.cells[i].filled ? 1 : 0;
+        stream->write(value);
+    }
 }
 
 void Level::deserialize(Serialization::Stream *stream)
@@ -346,6 +355,17 @@ void Level::deserialize(Serialization::Stream *stream)
         remove_avatar(uids_to_remove.back());
         uids_to_remove.pop_back();
     }
+
+    int w, h;
+    stream->read(&w);
+    stream->read(&h);
+    grid.init(w, h);
+    for(int i = 0; i < grid.width * grid.height; i++)
+    {
+        int value;
+        stream->read(&value);
+        grid.cells[i].filled = (value == 1) ? true : false;
+    }
 }
 
 void Level::reset()
@@ -355,10 +375,11 @@ void Level::reset()
     grid.world_scale = 1.0f;
 
     grid.clear();
+    
     for(v2i pos = {0, 0}; pos.x < grid.width / 2; pos.x++)
     {
         grid.at(pos)->filled = true;
-    }
+    }    
 
     // Reset all avatars
     for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
@@ -446,6 +467,12 @@ void Level::playing_step(GameInputList inputs, float time_step)
     {
         change_mode(PAUSED);
     }
+
+    if(Platform::Input::mouse_button(0))
+    {
+        v2 pos = Platform::Input::mouse_world_position();
+        grid.at(grid.world_to_cell(pos))->filled = true;
+    }
 }
 
 void Level::paused_step(GameInputList inputs, float time_step)
@@ -463,6 +490,17 @@ void Level::loss_step(GameInputList inputs, float time_step)
 void Level::playing_draw()
 {
     general_draw();
+
+    static char load_buff[64] = {};
+    static char save_buff[64] ={};
+    if(ImGui::InputText("Load level", load_buff, sizeof(load_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        load_with_file(load_buff, true);
+    }
+    if(ImGui::InputText("Save level", save_buff, sizeof(save_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        load_with_file(save_buff, false);
+    }
 }
 
 void Level::paused_draw()
@@ -534,6 +572,23 @@ void Level::general_draw()
                 Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
             }
         }
+    }
+}
+
+void Level::load_with_file(const char *path, bool reading)
+{
+    if(reading)
+    {
+        Serialization::Stream *stream = Serialization::make_stream_from_file(path);
+        deserialize(stream);
+        Serialization::free_stream(stream);
+    }
+    else
+    {
+        Serialization::Stream *stream = Serialization::make_stream();
+        serialize(stream);
+        stream->write_to_file(path);
+        Serialization::free_stream(stream);
     }
 }
 

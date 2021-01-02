@@ -24,15 +24,6 @@ using namespace GameMath;
 
 
 
-// I want the player to be able to move between a main menu, playing the game, pause menu, win/lose menu, etc...
-// I'm lost when thinking about where to put this state: under Program State or Game State
-// The program state holds information about how to handle game states and step them from one to the next
-// The game state holds information about input into the game and how to generate the next game state
-// i.e. the program state is the "timeline" of the game states
-// The main menu could be a particular "game state" that (maybe) updates on a different timeline
-// Pause menus can be built into the normal game states
-// These different game states will hold different information (The main menu shouldn't have a level)
-// The different game states should use the same UI tools for drawing UI
 struct MenuState
 {
     void step(float time_step);
@@ -47,8 +38,6 @@ struct GameState
         INVALID,
         MAIN_MENU,
         PLAYING_LEVEL,
-        LOSE_MENU,
-        WIN_MENU
     };
     Mode current_mode;
     Mode next_mode;
@@ -57,8 +46,8 @@ struct GameState
     unsigned int frame_number;
     std::vector<GameInput> inputs_this_frame;
 
-    MenuState *menu_state;        // For main menu, win/lose screen, etc. (What about pause menu? idk...)
-    Level *playing_level; // For when the player is playing the game
+    MenuState *menu_state; // For main menu, win/lose screen, etc. (What about pause menu? idk...)
+    Level *playing_level;  // For when the player is playing the game
 
     void step(std::vector<GameInput> *inputs, GameInput::UID focus_uid, float time_step);
     void draw();

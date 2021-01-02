@@ -2,6 +2,7 @@
 #include "serialization.h"
 
 #include "platform.h"
+#include "logging.h"
 
 
 
@@ -13,6 +14,25 @@ Serialization::Stream *Serialization::make_stream(int capacity)
     stream->stream_data = new char[capacity]();
     stream->current_offset = 0;
     return stream;
+}
+
+Serialization::Stream *Serialization::make_stream_from_file(const char *path)
+{
+    Platform::File *file = Platform::FileSystem::open(path, Platform::FileSystem::READ);
+    if(!file)
+    {
+        Log::log_error("Tried to make a stream from a non-existent file: %s", path);
+        return nullptr;
+    }
+
+    int file_size = Platform::FileSystem::size(file);
+
+    Stream *result = make_stream(file_size);
+    Platform::FileSystem::read(file, result->data(), file_size);
+
+    Platform::FileSystem::close(file);
+
+    return result;
 }
 
 void Serialization::free_stream(Stream *stream)
@@ -181,6 +201,13 @@ void Serialization::Stream::read(GameMath::v4 *item)
 void Serialization::Stream::read_array(int num, char *array)
 {
     read_stream_array_t(this, num, array);
+}
+
+void Serialization::Stream::write_to_file(const char *path)
+{
+    Platform::File *file = Platform::FileSystem::open(path, Platform::FileSystem::WRITE);
+    Platform::FileSystem::write(file, data(), size());
+    Platform::FileSystem::close(file);
 }
 
 

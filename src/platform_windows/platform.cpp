@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cassert>
+#include <vector>
 
 
 
@@ -324,8 +325,7 @@ static void ensure_directory_exists(const char *path)
     char *path_copy = new char[path_length + 1]();
     strcpy(path_copy, path);
 
-    int stack_count = 0;
-    char **dirs_stack = new char *[path_length]();
+    std::vector<char *> dirs_stack;
 
     char *start = path_copy;
     char *end = start + path_length;
@@ -339,27 +339,30 @@ static void ensure_directory_exists(const char *path)
             end--;
         }
 
+        // If finished with the whole spath, break;
+        if(end == start) break;
+
+        // Check if the directory exists
         *end = '\0';
         bool exists = directory_exists(start);
-        *end = '/';
-        if( (end == start) || exists ) break;
+        *end = '/'; // Replace the forward slash after marking the null terminator
+        if( exists ) break;
         
-
-        dirs_stack[stack_count++] = end;
+        // Record the directory to create
+        dirs_stack.push_back(end);
         end--;
     }
 
-    while(stack_count > 0)
+    while(!dirs_stack.empty())
     {
-        char *dir_path_end = dirs_stack[stack_count - 1];
-        stack_count--;
+        char *dir_path_end = dirs_stack.back();
+        dirs_stack.pop_back();
 
         *dir_path_end = '\0';
         CreateDirectory(start, NULL);
         *dir_path_end = '/';
     }
 
-    delete[] dirs_stack;
     delete[] path_copy;
 }
 

@@ -102,6 +102,8 @@ private:
     void win_draw();
     void loss_draw();
     void general_draw();
+
+    void load_with_file(const char *path, bool reading);
 };
 
 Level *create_level();
