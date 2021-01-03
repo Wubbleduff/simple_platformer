@@ -38,7 +38,7 @@ struct Network
         {
             int content_size;
         };
-        static const int RECEIVE_BUFFER_SIZE = 1024 * 2;
+        static const int RECEIVE_BUFFER_SIZE = 1024 * 1024;
         union
         {
             char *receive_buffer;

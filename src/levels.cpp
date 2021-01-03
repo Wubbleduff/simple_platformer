@@ -11,10 +11,20 @@
 #include "imgui.h"
 #include <map>
 #include <algorithm>
+#include <cassert>
 
 
 
 using namespace GameMath;
+
+
+
+// TODO: Global until I find a better place for this
+typedef std::map<int, char *> LevelsMap;
+static LevelsMap level_files =
+{
+    {0, "data/levels/level_0"}
+};
 
 
 
@@ -69,37 +79,22 @@ void Level::Grid::clear()
 
 Level::Grid::Cell *Level::Grid::at(v2i pos)
 {
-    int left_bound = -( (width - 1) / 2 ) - 1;
-    int right_bound = (width - 1) / 2;
+    assert(pos.x >= 0 && pos.x < width);
+    assert(pos.y >= 0 && pos.y < height);
 
-    int bottom_bound = -( (width - 1) / 2 ) - 1;
-    int top_bound = (width - 1) / 2;
-
-    //assert(pos.x >= left_bound && pos.x <= right_bound);
-    //assert(pos.y >= bottom_bound && pos.y <= top_bound);
-
-    int array_row = ( (height - 1) - (pos.y + abs(bottom_bound)) );
-    int array_col = pos.x + abs(left_bound);
-
-    return &(cells[array_row * width + array_col]);
+    return &(cells[pos.y * width + pos.x]);
 }
 
-Level::v2i Level::Grid::top_left()
+bool Level::Grid::valid_position(v2i pos)
 {
-    int left_bound = -( (width - 1) / 2 ) - 1;
-    int top_bound = (width - 1) / 2;
-    return v2i(left_bound, top_bound);
-} 
-
-Level::v2i Level::Grid::bottom_right()
-{
-    int right_bound = (width - 1) / 2;
-    int bottom_bound = -( (width - 1) / 2 ) - 1;
-    return v2i(right_bound, bottom_bound);
-} 
+    if(pos.x < 0 || pos.x >= width)  return false;
+    if(pos.y < 0 || pos.y >= height) return false;
+    return true;
+}
 
 v2 Level::Grid::cell_to_world(v2i pos)
 {
+    // TODO: BROKEN
     v2 world_pos = v2((float)pos.x, (float)pos.y);
     return world_pos * world_scale;
 }
@@ -113,9 +108,9 @@ Level::v2i Level::Grid::world_to_cell(v2 pos)
 
 
 
-void Level::Avatar::reset()
+void Level::Avatar::reset(Level *level)
 {
-    position = v2(2.0f, 4.0f);
+    position = v2(5, 20);
     grounded = false;
     horizontal_velocity = 0.0f;
     vertical_velocity = 0.0f;
@@ -196,11 +191,11 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
     std::vector<float> ups;
     std::vector<float> downs;
 
-    v2i tl = level->grid.top_left();
-    v2i br = level->grid.bottom_right();
-    for(v2i pos = tl; pos.y >= br.y; pos.y--)
+    v2i tl = v2i(0, 0);
+    v2i br = v2i(level->grid.width, level->grid.height);
+    for(v2i pos = tl; pos.y < br.y; pos.y++)
     {
-        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
+        for(pos.x = tl.x; pos.x < br.x; pos.x++)
         {
             if(level->grid.at(pos)->filled)
             {
@@ -217,7 +212,8 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
                     bool blocked = false;
                     v2 n_dir = normalize(dir);
                     v2i dir_i = v2i((int)(n_dir.x), (int)(n_dir.y));
-                    if(level->grid.at(pos + dir_i)->filled)
+                    v2i pos_in_question = pos + dir_i;
+                    if(level->grid.valid_position(pos_in_question) && level->grid.at(pos_in_question)->filled)
                     {
                         blocked = true;
                     }
@@ -281,6 +277,24 @@ void Level::step(GameInputList inputs, float time_step)
     }
 }
 
+void Level::edit_step(float time_step)
+{
+    if(Platform::Input::mouse_button(1))
+    {
+        v2 pos = Platform::Input::mouse_world_position();
+        v2i grid_pos = grid.world_to_cell(pos);
+        if(grid.valid_position(grid_pos))
+        {
+            grid.at(grid_pos)->filled = true;
+        }
+    }
+
+    if(Platform::Input::key_down('M'))
+    {
+        Game::exit_to_main_menu();
+    }
+}
+
 void Level::draw()
 {
     switch(current_mode)
@@ -290,6 +304,34 @@ void Level::draw()
         case WIN:     { win_draw(); break; }
         case LOSS:    { loss_draw(); break; }
     }
+}
+
+void Level::edit_draw()
+{
+    general_draw();
+
+    ImGui::Begin("Editor");
+    static char load_buff[64] = "data/levels/";
+    if(ImGui::InputText("Load level", load_buff, sizeof(load_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        load_with_file(load_buff, true);
+    }
+
+    static char save_buff[64] = "data/levels/";
+    if(ImGui::InputText("Save level", save_buff, sizeof(save_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        load_with_file(save_buff, false);
+    }
+
+    static char level_0_buff[64] = "data/levels/";
+    if(ImGui::InputText("Set level 0", level_0_buff, sizeof(level_0_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        // TODO: Temporary leak until the level table is formailzed
+        char *file_path = new char[64];
+        strcpy(file_path, level_0_buff);
+        level_files[0] = file_path;
+    }
+    ImGui::End();
 }
 
 void Level::serialize(Serialization::Stream *stream)
@@ -307,6 +349,7 @@ void Level::serialize(Serialization::Stream *stream)
 
     stream->write(grid.width);
     stream->write(grid.height);
+    stream->write(grid.world_scale);
     for(int i = 0; i < grid.width * grid.height; i++)
     {
         int value = grid.cells[i].filled ? 1 : 0;
@@ -360,6 +403,7 @@ void Level::deserialize(Serialization::Stream *stream)
     stream->read(&w);
     stream->read(&h);
     grid.init(w, h);
+    stream->read(&grid.world_scale);
     for(int i = 0; i < grid.width * grid.height; i++)
     {
         int value;
@@ -368,23 +412,29 @@ void Level::deserialize(Serialization::Stream *stream)
     }
 }
 
-void Level::reset()
+void Level::reset(int level_num)
 {
-    change_mode(PLAYING);
+    LevelsMap::iterator it = level_files.find(level_num);
+    if(it != level_files.end())
+    {
+        char *path = it->second;
+        load_with_file(path, true);
+    }
+    else
+    {
+        Log::log_error("Could not find file associated with level %i", level_num);
+        reset_to_default_level();
+    }
+}
 
+void Level::reset_to_default_level()
+{
+    grid.init(256, 256);
     grid.world_scale = 1.0f;
-
     grid.clear();
-    
     for(v2i pos = {0, 0}; pos.x < grid.width / 2; pos.x++)
     {
         grid.at(pos)->filled = true;
-    }    
-
-    // Reset all avatars
-    for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
-    {
-        pair.second->reset();
     }
 }
 
@@ -401,7 +451,7 @@ void Level::cleanup()
 Level::Avatar *Level::add_avatar(GameInput::UID id)
 {
     Avatar *new_avatar = new Avatar();
-    new_avatar->reset();
+    new_avatar->reset(this);
     avatars[id] = new_avatar;
 
     return new_avatar;
@@ -468,11 +518,6 @@ void Level::playing_step(GameInputList inputs, float time_step)
         change_mode(PAUSED);
     }
 
-    if(Platform::Input::mouse_button(0))
-    {
-        v2 pos = Platform::Input::mouse_world_position();
-        grid.at(grid.world_to_cell(pos))->filled = true;
-    }
 }
 
 void Level::paused_step(GameInputList inputs, float time_step)
@@ -490,17 +535,6 @@ void Level::loss_step(GameInputList inputs, float time_step)
 void Level::playing_draw()
 {
     general_draw();
-
-    static char load_buff[64] = {};
-    static char save_buff[64] ={};
-    if(ImGui::InputText("Load level", load_buff, sizeof(load_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        load_with_file(load_buff, true);
-    }
-    if(ImGui::InputText("Save level", save_buff, sizeof(save_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        load_with_file(save_buff, false);
-    }
 }
 
 void Level::paused_draw()
@@ -528,7 +562,11 @@ void Level::loss_draw()
     general_draw();
 
     ImGui::Begin("You lose!");
-    if(ImGui::Button("Restart"))   reset();
+    if(ImGui::Button("Restart"))
+    {
+        reset(0);
+        change_mode(PLAYING);
+    }
     if(ImGui::Button("Main Menu")) Game::exit_to_main_menu();
     if(ImGui::Button("Quit Game")) Game::stop();
     ImGui::End();
@@ -545,7 +583,7 @@ void Level::general_draw()
         Avatar *focus_avatar = focus_avatar_it->second;
         Graphics::set_camera_position(focus_avatar->position + camera_offset);
     }
-    Graphics::set_camera_width(64.0f);
+    Graphics::set_camera_width(164.0f);
 
     // Draw the players
     for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
@@ -555,17 +593,17 @@ void Level::general_draw()
     }
 
     // Draw grid terrain
-    v2i tl = grid.top_left();
-    v2i br = grid.bottom_right();
-    for(v2i pos = tl; pos.y >= br.y; pos.y--)
+    v2i tl = v2i(0, 0);
+    v2i br = v2i(grid.width, grid.height);
+    for(v2i pos = tl; pos.y < br.y; pos.y++)
     {
-        for(pos.x = tl.x; pos.x <= br.x; pos.x++)
+        for(pos.x = tl.x; pos.x < br.x; pos.x++)
         {
             if(grid.at(pos)->filled)
             {
-                float inten = (float)pos.col / grid.width;
+                float inten = (float)pos.x / grid.width;
                 v4 color = v4(1.0f - inten, 0.0f, inten, 1.0f);
-                if(pos.col == grid.width / 2) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
+                if(pos.x == grid.width / 2) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
 
                 v2 world_pos = grid.cell_to_world(pos) + v2(1.0f, 1.0f) * grid.world_scale / 2.0f;
                 float scale = grid.world_scale * 0.95f;
@@ -594,11 +632,10 @@ void Level::load_with_file(const char *path, bool reading)
 
 
 
-Level *create_level()
+Level *create_level(int level_num)
 {
     Level *new_level = new Level();
-    new_level->grid.init(256, 256);
-    new_level->reset();
+    new_level->reset(level_num);
     return new_level;
 }
 

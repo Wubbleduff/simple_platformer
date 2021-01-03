@@ -78,6 +78,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         {
             Platform::Input::record_mouse_event(0, false);
         } break;
+        case WM_RBUTTONDOWN:
+        {
+            Platform::Input::record_mouse_event(1, true);
+        } break;
+        case WM_RBUTTONUP:
+        {
+            Platform::Input::record_mouse_event(1, false);
+        } break;
         default:
         {
             result = DefWindowProc(window, message, wParam, lParam);

@@ -38,6 +38,7 @@ struct GameState
         INVALID,
         MAIN_MENU,
         PLAYING_LEVEL,
+        EDITING
     };
     Mode current_mode;
     Mode next_mode;
@@ -196,6 +197,9 @@ void GameState::check_for_mode_switch()
             case PLAYING_LEVEL:
                 init_for_playing_level(false);
                 break;
+            case EDITING:
+                init_for_playing_level(false);
+                break;
         }
 
         // Init next state
@@ -205,6 +209,9 @@ void GameState::check_for_mode_switch()
                 init_for_main_menu(true);
                 break;
             case PLAYING_LEVEL:
+                init_for_playing_level(true);
+                break;
+            case EDITING:
                 init_for_playing_level(true);
                 break;
         }
@@ -230,6 +237,9 @@ void GameState::step(std::vector<GameInput> *inputs, GameInput::UID focus_uid, f
         case Mode::PLAYING_LEVEL:
             playing_level->step(inputs_this_frame, time_step);
             break;
+        case Mode::EDITING:
+            playing_level->edit_step(time_step);
+            break;
     }
 }
 
@@ -242,6 +252,9 @@ void GameState::draw()
         break;
     case Mode::PLAYING_LEVEL:
         playing_level->draw();
+        break;
+    case Mode::EDITING:
+        playing_level->edit_draw();
         break;
     }
 }
@@ -308,7 +321,7 @@ void GameState::init_for_playing_level(bool initting)
         my_uid = 0;
         frame_number = 0;
         inputs_this_frame.clear();
-        playing_level = create_level();
+        playing_level = create_level(0);
     }
     else
     {
@@ -328,6 +341,10 @@ void MenuState::draw()
     if(ImGui::Button("Start Game"))
     {
         Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
+    }
+    if(ImGui::Button("Edit Game"))
+    {
+        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::EDITING);
     }
     if(ImGui::Button("Quit Game"))
     {

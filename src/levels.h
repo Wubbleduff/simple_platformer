@@ -14,7 +14,6 @@ public:
     {
         union
         {
-            struct { int row, col; };
             struct { int x, y; };
             int v[2];
         };
@@ -41,8 +40,7 @@ public:
         void init(int w, int h);
         void clear();
         Cell *at(v2i pos);
-        v2i top_left();
-        v2i bottom_right();
+        bool valid_position(v2i pos);
         GameMath::v2 cell_to_world(v2i pos);
         v2i world_to_cell(GameMath::v2 pos);
     };
@@ -60,7 +58,7 @@ public:
         float gravity;
         float full_extent;
 
-        void reset();
+        void reset(Level *level);
         void step(GameInput *input, Level *level, float time_step);
         void draw();
         void check_and_resolve_collisions(Level *level);
@@ -79,10 +77,13 @@ public:
     Mode current_mode;
 
     void step(GameInputList inputs, float time_step);
+    void edit_step(float time_step);
     void draw();
+    void edit_draw();
     void serialize(Serialization::Stream *stream);
     void deserialize(Serialization::Stream *stream);
-    void reset();
+    void reset(int level_num);
+    void reset_to_default_level();
     void change_mode(Mode new_mode);
     void cleanup();
 
@@ -106,5 +107,5 @@ private:
     void load_with_file(const char *path, bool reading);
 };
 
-Level *create_level();
+Level *create_level(int level_num);
 void destroy_level(Level *level);

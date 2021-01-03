@@ -5,6 +5,7 @@
 #include "data_structures.h"
 
 #include <vector>
+#include <cassert>
 #include <WinSock2.h> // Networking API
 #include <Ws2tcpip.h> // InetPton
 #include <time.h>
@@ -26,8 +27,6 @@ struct NetworkState
     SOCKET listening_socket;
 };
 NetworkState *Network::instance = nullptr;
-
-
 
 static int get_last_error()
 {
@@ -401,7 +400,7 @@ void Network::Connection::add_data_frame(const char *frame)
 {
     const Header *frame_header = (const Header *)frame;
     int new_frame_bytes = HEADER_SIZE + frame_header->content_size;
-    char *new_frame = new char[new_frame_bytes]();
+    char *new_frame = new char[new_frame_bytes];
     Platform::Memory::memcpy(new_frame, frame, new_frame_bytes);
     recorded_frames.push_back(new_frame);
 }
@@ -426,6 +425,10 @@ void Network::Connection::update_receive_state()
         {
             receive_up_to_bytes = buffer_header->content_size;
         }
+
+        char *receive_buffer_end = receive_buffer + RECEIVE_BUFFER_SIZE;
+        // Make sure the receive buffer is large enough for the bytes to read in
+        assert(receive_target + receive_up_to_bytes < receive_buffer_end);
 
         int received_bytes;
         received_new_data = read_bytes_from_socket(tcp_socket,
