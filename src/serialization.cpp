@@ -21,7 +21,7 @@ Serialization::Stream *Serialization::make_stream_from_file(const char *path)
     Platform::File *file = Platform::FileSystem::open(path, Platform::FileSystem::READ);
     if(!file)
     {
-        Log::log_error("Tried to make a stream from a non-existent file: %s", path);
+        //Log::log_error("Tried to make a stream from a non-existent file: %s", path);
         return nullptr;
     }
 

@@ -30,6 +30,10 @@ public:
         struct Cell
         {
             bool filled;
+            bool win_when_touched;
+
+            void reset();
+            void serialize(Serialization::Stream *stream, bool writing = true);
         };
 
         // How big is a grid cell in world space?
@@ -43,6 +47,9 @@ public:
         bool valid_position(v2i pos);
         GameMath::v2 cell_to_world(v2i pos);
         v2i world_to_cell(GameMath::v2 pos);
+        v2i bottom_left();
+        v2i top_right();
+        v2i grid_coordinate_to_memory_coordinate(v2i grid_coord);
     };
 
     struct Avatar

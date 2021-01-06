@@ -398,7 +398,8 @@ Platform::File *Platform::FileSystem::open(const char *path, FileMode mode)
 
     if(file->file == NULL)
     {
-        Log::log_error("Couldn't open file %s", path);
+        //Log::log_error("Couldn't open file %s", path);
+        return nullptr;
     }
 
     return file;

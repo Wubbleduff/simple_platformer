@@ -309,7 +309,6 @@ void GameState::init_for_main_menu(bool initting)
         if(menu_state) menu_state->cleanup();
         delete menu_state;
         menu_state = nullptr;
-        Log::log_info("Shut down main menu");
     }
 }
 

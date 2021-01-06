@@ -20,8 +20,8 @@ using namespace GameMath;
 
 
 // TODO: Global until I find a better place for this
-typedef std::map<int, char *> LevelsMap;
-static LevelsMap level_files =
+typedef std::map<int, char *> LevelFilessMap;
+static LevelFilessMap level_files =
 {
     {0, "data/levels/level_0"}
 };
@@ -64,6 +64,30 @@ static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
 
 
 
+void Level::Grid::Cell::reset()
+{
+    filled = false;
+    win_when_touched = false;
+}
+
+void Level::Grid::Cell::serialize(Serialization::Stream *stream, bool writing)
+{
+    if(writing)
+    {
+        stream->write(filled ? 1 : 0);
+        stream->write(win_when_touched ? 1 : 0);
+    }
+    else
+    {
+        int val;
+        stream->read(&val);
+        filled = (val == 0 ? false : true);
+
+        stream->read(&val);
+        win_when_touched = (val == 0 ? false : true);
+    }
+}
+
 void Level::Grid::init(int w, int h)
 {
     delete[] cells;
@@ -74,27 +98,28 @@ void Level::Grid::init(int w, int h)
 
 void Level::Grid::clear()
 {
-    for(int i = 0; i < width * height; i++) cells[i].filled = false;
+    for(int i = 0; i < width * height; i++) cells[i].reset();
 }
 
 Level::Grid::Cell *Level::Grid::at(v2i pos)
 {
-    assert(pos.x >= 0 && pos.x < width);
-    assert(pos.y >= 0 && pos.y < height);
+    bool valid = valid_position(pos);
+    assert(valid);
 
-    return &(cells[pos.y * width + pos.x]);
+    v2i memory_coord = grid_coordinate_to_memory_coordinate(pos);
+    return &(cells[memory_coord.y * width + memory_coord.x]);
 }
 
 bool Level::Grid::valid_position(v2i pos)
 {
-    if(pos.x < 0 || pos.x >= width)  return false;
-    if(pos.y < 0 || pos.y >= height) return false;
+    v2i memory_coord = grid_coordinate_to_memory_coordinate(pos);
+    if(memory_coord.x < 0 || memory_coord.x >= width)  return false;
+    if(memory_coord.y < 0 || memory_coord.y >= height) return false;
     return true;
 }
 
 v2 Level::Grid::cell_to_world(v2i pos)
 {
-    // TODO: BROKEN
     v2 world_pos = v2((float)pos.x, (float)pos.y);
     return world_pos * world_scale;
 }
@@ -102,8 +127,40 @@ v2 Level::Grid::cell_to_world(v2i pos)
 Level::v2i Level::Grid::world_to_cell(v2 pos)
 {
     pos *= (1.0f / world_scale);
-    v2i cell = v2i((int)pos.x, (int)pos.y);
+    v2i cell = v2i((int)pos.x, (int)pos.y); // Should return the bottom left of a grid cell in the world
     return cell;
+}
+
+Level::v2i Level::Grid::bottom_left()
+{
+    return {-width / 2, -height / 2};
+}
+
+Level::v2i Level::Grid::top_right()
+{
+    return {width / 2 - 1, height / 2 - 1};
+}
+
+Level::v2i Level::Grid::grid_coordinate_to_memory_coordinate(v2i grid_coord)
+{
+    /*             X  Y
+     * get 0, 0 -> 4, 3
+          0 1 2 3 4 5 6 7
+        0
+        1
+        2
+        3       x x <-- will pick this one if width and height are even (top-left one)
+        4       x x
+        5
+        6
+        7
+        
+    */
+    v2i result = grid_coord;
+    result.x += width / 2;  // Move selection to middle of memory grid
+    result.y = (height - 1) - result.y; // Invert the y selection
+    result.y -= height / 2; // Move selection to middle of memory grid
+    return result;
 }
 
 
@@ -166,10 +223,6 @@ void Level::Avatar::step(GameInput *input, Level *level, float time_step)
 
     check_and_resolve_collisions(level);
 
-    if(position.x > 20.0f)
-    {
-        level->change_mode(WIN);
-    }
     if(position.y < -5.0f)
     {
         level->change_mode(LOSS);
@@ -190,20 +243,19 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
     std::vector<float> lefts;
     std::vector<float> ups;
     std::vector<float> downs;
+    bool won_game = false;
 
-    v2i tl = v2i(0, 0);
-    v2i br = v2i(level->grid.width, level->grid.height);
-    for(v2i pos = tl; pos.y < br.y; pos.y++)
+    v2i bl = level->grid.bottom_left();
+    v2i tr = level->grid.top_right();
+    for(v2i pos = bl; pos.y <= tr.y; pos.y++)
     {
-        for(pos.x = tl.x; pos.x < br.x; pos.x++)
+        for(pos.x = bl.x; pos.x <= tr.x; pos.x++)
         {
             if(level->grid.at(pos)->filled)
             {
                 v2 cell_world_position = level->grid.cell_to_world(pos);
-
                 v2 cell_bl = cell_world_position;
                 v2 cell_tr = cell_world_position + v2(1.0f, 1.0f) * level->grid.world_scale;
-
                 v2 dir;
                 float depth;
                 bool collision = aabb(cell_bl, cell_tr, avatar_bl, avatar_tr, &dir, &depth);
@@ -225,6 +277,20 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
                         if(dir_i.x ==  0 && dir_i.y ==  1) ups.push_back(depth);
                         if(dir_i.x ==  0 && dir_i.y == -1) downs.push_back(depth);
                     }
+                }
+            }
+
+            if(level->grid.at(pos)->win_when_touched)
+            {
+                v2 cell_world_position = level->grid.cell_to_world(pos);
+                v2 cell_bl = cell_world_position;
+                v2 cell_tr = cell_world_position + v2(1.0f, 1.0f) * level->grid.world_scale;
+                v2 dir;
+                float depth;
+                bool collision = aabb(cell_bl, cell_tr, avatar_bl, avatar_tr, &dir, &depth);
+                if(collision)
+                {
+                    won_game = true;
                 }
             }
         }
@@ -262,6 +328,11 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
     {
         horizontal_velocity = 0.0f;
     }
+
+    if(won_game)
+    {
+        level->change_mode(Level::Mode::WIN);
+    }
 }
 
 
@@ -286,6 +357,16 @@ void Level::edit_step(float time_step)
         if(grid.valid_position(grid_pos))
         {
             grid.at(grid_pos)->filled = true;
+        }
+    }
+
+    if(Platform::Input::key_down('W'))
+    {
+        v2 pos = Platform::Input::mouse_world_position();
+        v2i grid_pos = grid.world_to_cell(pos);
+        if(grid.valid_position(grid_pos))
+        {
+            grid.at(grid_pos)->win_when_touched = true;
         }
     }
 
@@ -352,8 +433,7 @@ void Level::serialize(Serialization::Stream *stream)
     stream->write(grid.world_scale);
     for(int i = 0; i < grid.width * grid.height; i++)
     {
-        int value = grid.cells[i].filled ? 1 : 0;
-        stream->write(value);
+        grid.cells[i].serialize(stream, true);
     }
 }
 
@@ -406,15 +486,13 @@ void Level::deserialize(Serialization::Stream *stream)
     stream->read(&grid.world_scale);
     for(int i = 0; i < grid.width * grid.height; i++)
     {
-        int value;
-        stream->read(&value);
-        grid.cells[i].filled = (value == 1) ? true : false;
+        grid.cells[i].serialize(stream, false);
     }
 }
 
 void Level::reset(int level_num)
 {
-    LevelsMap::iterator it = level_files.find(level_num);
+    LevelFilessMap::iterator it = level_files.find(level_num);
     if(it != level_files.end())
     {
         char *path = it->second;
@@ -435,6 +513,12 @@ void Level::reset_to_default_level()
     for(v2i pos = {0, 0}; pos.x < grid.width / 2; pos.x++)
     {
         grid.at(pos)->filled = true;
+    }
+
+    for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
+    {
+        Avatar *avatar = pair.second;
+        avatar->reset(this);
     }
 }
 
@@ -583,7 +667,7 @@ void Level::general_draw()
         Avatar *focus_avatar = focus_avatar_it->second;
         Graphics::set_camera_position(focus_avatar->position + camera_offset);
     }
-    Graphics::set_camera_width(164.0f);
+    Graphics::set_camera_width(64.0f);
 
     // Draw the players
     for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
@@ -593,11 +677,11 @@ void Level::general_draw()
     }
 
     // Draw grid terrain
-    v2i tl = v2i(0, 0);
-    v2i br = v2i(grid.width, grid.height);
-    for(v2i pos = tl; pos.y < br.y; pos.y++)
+    v2i bl = grid.bottom_left();
+    v2i tr = grid.top_right();
+    for(v2i pos = bl; pos.y <= tr.y; pos.y++)
     {
-        for(pos.x = tl.x; pos.x < br.x; pos.x++)
+        for(pos.x = bl.x; pos.x <= tr.x; pos.x++)
         {
             if(grid.at(pos)->filled)
             {
@@ -609,8 +693,27 @@ void Level::general_draw()
                 float scale = grid.world_scale * 0.95f;
                 Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
             }
+
+            if(grid.at(pos)->win_when_touched)
+            {
+                v4 color = v4(0.0f, 1.0f, 0.0f, 1.0f);
+                v2 world_pos = grid.cell_to_world(pos) + v2(1.0f, 1.0f) * grid.world_scale / 2.0f;
+                float scale = grid.world_scale * 0.95f;
+                Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
+            }
         }
     }
+
+    ImGui::Begin("Debug");
+    static char load_level_buff[64] = "data/levels/";
+    if(ImGui::InputText("Set level 0", load_level_buff, sizeof(load_level_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        // TODO: Temporary leak until the level table is formailzed
+        char *file_path = new char[64];
+        strcpy(file_path, load_level_buff);
+        load_with_file(load_level_buff, true);
+    }
+    ImGui::End();
 }
 
 void Level::load_with_file(const char *path, bool reading)
@@ -618,8 +721,15 @@ void Level::load_with_file(const char *path, bool reading)
     if(reading)
     {
         Serialization::Stream *stream = Serialization::make_stream_from_file(path);
-        deserialize(stream);
-        Serialization::free_stream(stream);
+        if(stream)
+        {
+            deserialize(stream);
+            Serialization::free_stream(stream);
+        }
+        else
+        {
+            reset_to_default_level();
+        }
     }
     else
     {
