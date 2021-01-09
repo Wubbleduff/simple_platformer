@@ -39,6 +39,12 @@ namespace GameMath
         float from_percent = inv_lerp(from_min, from_max, a);
         return lerp(to_min, to_max, from_percent);
     }
+    float average(float *values, int num)
+    {
+        float sum = 0.0f;
+        for(int i = 0; i < num; i++) sum += values[i];
+        return sum / (float)num;
+    }
 
 
 

@@ -12,6 +12,7 @@
 #include "levels.h"
 
 #include <vector>
+#include <array>
 #include <map>
 #include <algorithm>
 
@@ -60,14 +61,29 @@ struct GameState
     void deserialize_from(Serialization::Stream *stream);
 };
 
+struct Timeline
+{
+    static const int MAX_STEPS_PER_UPDATE;
+    float seconds_since_last_step;
+    float last_update_time;
+
+    float step_frequency;
+
+    int next_step_time_index;
+    std::array<float, 120> step_times;
+
+    void reset();
+    void step_with_frequency(float freq);
+    void update();
+};
+const int Timeline::MAX_STEPS_PER_UPDATE = 10;
+
 struct ProgramState
 {
-    static const double TARGET_STEP_TIME;
-    static const int MAX_STEPS_PER_LOOP;
-
+    static const float TARGET_STEP_TIME;
     bool running;
-    double seconds_since_last_step;
-    double last_loop_time;
+
+    Timeline *timeline = nullptr;
 
     enum class NetworkMode
     {
@@ -119,8 +135,7 @@ struct ProgramState
     void shutdown();
 };
 ProgramState *Game::program_state = nullptr;
-const double ProgramState::TARGET_STEP_TIME = 0.01666; // In seconds
-const int ProgramState::MAX_STEPS_PER_LOOP = 10;
+const float ProgramState::TARGET_STEP_TIME = 0.01666; // In seconds
 static const int SERVER_PORT = 4242;
 const float ProgramState::Client::TIMEOUT = 2.0f;
 
@@ -326,7 +341,6 @@ void GameState::init_for_playing_level(bool initting)
     {
         destroy_level(playing_level);
         playing_level = nullptr;
-        Log::log_info("Shut down playing level");
     }
 }
 
@@ -355,6 +369,93 @@ void MenuState::draw()
 void MenuState::cleanup()
 {
 }
+
+
+
+void Timeline::reset()
+{
+    seconds_since_last_step = 0.0f;
+    last_update_time = (float)Platform::time_since_start();
+
+    step_frequency = 0.0f;
+
+    next_step_time_index = 0;
+}
+
+void Timeline::step_with_frequency(float freq)
+{
+    step_frequency = freq;
+}
+
+void Timeline::update()
+{
+    float this_update_time = (float)Platform::time_since_start();
+    float diff = this_update_time - last_update_time;
+    last_update_time = this_update_time;
+    seconds_since_last_step += diff;
+
+    // If time to do a step (i.e. timeline has crossed a step boundary)
+    if(seconds_since_last_step >= step_frequency)
+    {
+        // Check how many step boundaries were crossed
+        // (check how many steps to do this update)
+        int num_steps_to_do = (int)(seconds_since_last_step / step_frequency);
+
+        // Check if the number of steps to do is lower than the limit
+        // so we don't blackhole with our timeline
+        if(num_steps_to_do <= MAX_STEPS_PER_UPDATE)
+        {
+            // Step the game forward n times
+            for(int i = 0; i < num_steps_to_do; i++)
+            {
+                float step_start = Platform::time_since_start();
+                Game::program_state->do_one_step(step_frequency);
+                float step_end = Platform::time_since_start();
+
+                float step_diff = step_end - step_start;
+                step_times[next_step_time_index++] = step_diff;
+                if(next_step_time_index >= step_times.size())
+                {
+                    next_step_time_index = 0;
+                }
+            }
+
+            // Reset the timer
+            seconds_since_last_step -= step_frequency * num_steps_to_do;
+        }
+        else
+        {
+            // There were more steps to do than allowed, only update
+            // by the max number of steps to avoid a blackhole
+            for(int i = 0; i < MAX_STEPS_PER_UPDATE; i++)
+            {
+                float step_start = Platform::time_since_start();
+                Game::program_state->do_one_step(step_frequency);
+                float step_end = Platform::time_since_start();
+
+                float step_diff = step_end - step_start;
+                step_times[next_step_time_index++] = step_diff;
+                if(next_step_time_index >= step_times.size())
+                {
+                    next_step_time_index = 0;
+                }
+            }
+
+            // Reset the timer to zero
+            // (it doesn't make sense to only reduce it by step_frequency * num_steps_to_do
+            // because we missed some boundaries anyways)
+            seconds_since_last_step = 0.0f;
+
+            Log::log_warning("Exceeded max steps per timeline update");
+        }
+    }
+    else
+    {
+        // Timeline hasn't reached a step boundary, wait for a bit
+        // Maybe Sleep() here? Busy waiting at the moment...
+    }
+}
+
 
 
 
@@ -454,6 +555,20 @@ void ProgramState::step_as_offline(float time_step)
 
         if(ImGui::Button("Switch to client")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
         if(ImGui::Button("Switch to server")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+
+        ImGui::Begin("Frame times");
+#if 0
+        for(int i = 0; i < Game::program_state->timeline->step_times.size(); i++)
+        {
+            float step_time = Game::program_state->timeline->step_times[i];
+
+            ImGui::Text("Time: %f", step_time);
+        }
+#endif
+        float avg = GameMath::average(Game::program_state->timeline->step_times.data(), Game::program_state->timeline->step_times.size());
+        ImGui::Text("Average step time: %f", avg);
+        ImGui::PlotHistogram("Step Times", Game::program_state->timeline->step_times.data(), Game::program_state->timeline->step_times.size(), 0, 0, 0.0f, 0.032f, ImVec2(512.0f, 256.0f));
+        ImGui::End();
 
         GameConsole::draw();
 
@@ -721,14 +836,15 @@ void ProgramState::shutdown()
 void ProgramState::init()
 {
     running = true;
-    seconds_since_last_step = 0.0;
-    last_loop_time = 0.0;
+
+    timeline = new Timeline();
 
     network_mode = ProgramState::NetworkMode::OFFLINE;
 
     current_game_state = new GameState();
     current_game_state->current_mode = GameState::Mode::INVALID;
     current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
+
 }
 
 
@@ -747,54 +863,18 @@ void Game::start()
     program_state = new ProgramState();
     program_state->init();
 
-    program_state->last_loop_time = Platform::time_since_start();
+    program_state->timeline->reset();
+    program_state->timeline->step_with_frequency(ProgramState::TARGET_STEP_TIME);
     while(program_state->running)
     {
+        // Check on OS events as frequently as possible
         Platform::handle_os_events();
-
         if(program_state->running == false) break;
 
-        double this_loop_time = Platform::time_since_start();
-        double seconds_since_last_loop = this_loop_time - program_state->last_loop_time;
-        program_state->last_loop_time = this_loop_time;
-        program_state->seconds_since_last_step += seconds_since_last_loop;
-
-        // If the target step_seconds has passed since last step, do one step
-        if(program_state->seconds_since_last_step >= ProgramState::TARGET_STEP_TIME)
-        {
-            // You may have to update the engine more than once if more than one step time has passed
-            int num_steps_to_do = (int)(program_state->seconds_since_last_step / ProgramState::TARGET_STEP_TIME);
-
-            if(num_steps_to_do <= ProgramState::MAX_STEPS_PER_LOOP)
-            {
-                for(int i = 0; i < num_steps_to_do; i++)
-                {
-                    // Move the engine forward in time by the target seconds
-                    program_state->do_one_step(ProgramState::TARGET_STEP_TIME);
-                }
-
-                // Reset the timer
-                program_state->seconds_since_last_step -= ProgramState::TARGET_STEP_TIME * num_steps_to_do;
-            }
-            else
-            {
-                // Frame took too long
-                for(int i = 0; i < ProgramState::MAX_STEPS_PER_LOOP; i++)
-                {
-                    // Move the engine forward in time by the target seconds
-                    program_state->do_one_step(ProgramState::TARGET_STEP_TIME);
-                }
-
-                // Reset the timer
-                program_state->seconds_since_last_step = 0.0f;
-            }
-        }
-        else
-        {
-            // Wait for a bit
-        }
+        program_state->timeline->update();
     }
 
+    // -----------------
     program_state->shutdown();
 }
 
@@ -813,4 +893,5 @@ void Game::exit_to_main_menu()
     program_state->current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
     program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
 }
+
 

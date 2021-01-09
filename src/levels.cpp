@@ -23,7 +23,9 @@ using namespace GameMath;
 typedef std::map<int, char *> LevelFilessMap;
 static LevelFilessMap level_files =
 {
-    {0, "data/levels/level_0"}
+    {0, "data/levels/level_0"},
+    {1, "data/levels/level_1"},
+    {2, "data/levels/level_2"}
 };
 
 
@@ -243,10 +245,10 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
     std::vector<float> lefts;
     std::vector<float> ups;
     std::vector<float> downs;
-    bool won_game = false;
+    bool won_level = false;
 
-    v2i bl = level->grid.bottom_left();
-    v2i tr = level->grid.top_right();
+    v2i bl = level->grid.world_to_cell(avatar_bl) - v2i(1, 1);
+    v2i tr = level->grid.world_to_cell(avatar_tr) + v2i(1, 1);
     for(v2i pos = bl; pos.y <= tr.y; pos.y++)
     {
         for(pos.x = bl.x; pos.x <= tr.x; pos.x++)
@@ -290,7 +292,7 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
                 bool collision = aabb(cell_bl, cell_tr, avatar_bl, avatar_tr, &dir, &depth);
                 if(collision)
                 {
-                    won_game = true;
+                    won_level = true;
                 }
             }
         }
@@ -329,7 +331,7 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
         horizontal_velocity = 0.0f;
     }
 
-    if(won_game)
+    if(won_level)
     {
         level->change_mode(Level::Mode::WIN);
     }
@@ -350,23 +352,25 @@ void Level::step(GameInputList inputs, float time_step)
 
 void Level::edit_step(float time_step)
 {
-    if(Platform::Input::mouse_button(1))
+    if(Platform::Input::key('Q'))
     {
         v2 pos = Platform::Input::mouse_world_position();
         v2i grid_pos = grid.world_to_cell(pos);
         if(grid.valid_position(grid_pos))
         {
-            grid.at(grid_pos)->filled = true;
+            bool fill = !Platform::Input::key((int)Platform::Input::Key::SHIFT);
+            grid.at(grid_pos)->filled = fill;
         }
     }
 
-    if(Platform::Input::key_down('W'))
+    if(Platform::Input::key('W'))
     {
         v2 pos = Platform::Input::mouse_world_position();
         v2i grid_pos = grid.world_to_cell(pos);
         if(grid.valid_position(grid_pos))
         {
-            grid.at(grid_pos)->win_when_touched = true;
+            bool fill = !Platform::Input::key((int)Platform::Input::Key::SHIFT);
+            grid.at(grid_pos)->win_when_touched = fill;
         }
     }
 
@@ -497,17 +501,19 @@ void Level::reset(int level_num)
     {
         char *path = it->second;
         load_with_file(path, true);
+        number = level_num;
     }
     else
     {
         Log::log_error("Could not find file associated with level %i", level_num);
         reset_to_default_level();
+        number = 0;
     }
 }
 
 void Level::reset_to_default_level()
 {
-    grid.init(256, 256);
+    grid.init(256, 64);
     grid.world_scale = 1.0f;
     grid.clear();
     for(v2i pos = {0, 0}; pos.x < grid.width / 2; pos.x++)
@@ -601,6 +607,10 @@ void Level::playing_step(GameInputList inputs, float time_step)
     {
         change_mode(PAUSED);
     }
+    if(Platform::Input::key_down('N'))
+    {
+        reset_to_default_level();
+    }
 
 }
 
@@ -610,6 +620,7 @@ void Level::paused_step(GameInputList inputs, float time_step)
 
 void Level::win_step(GameInputList inputs, float time_step)
 {
+
 }
 
 void Level::loss_step(GameInputList inputs, float time_step)
@@ -636,6 +647,15 @@ void Level::paused_draw()
 void Level::win_draw()
 {
     ImGui::Begin("You win!!!");
+    int next_level_num = number + 1;
+    if(next_level_num < level_files.size())
+    {
+        if(ImGui::Button("Next Level"))
+        {
+            reset(next_level_num);
+            change_mode(PLAYING);
+        }
+    }
     if(ImGui::Button("Main Menu")) Game::exit_to_main_menu();
     if(ImGui::Button("Quit Game")) Game::stop();
     ImGui::End();

@@ -79,6 +79,7 @@ public:
         LOSS
     };
 
+    int number;
     Grid grid;
     std::map<GameInput::UID, Avatar *> avatars;
     Mode current_mode;

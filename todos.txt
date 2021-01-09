@@ -1,12 +1,17 @@
 
 Todo:
-* 5  Make a main menu, pause menu, and win/loss menu (full game loop)
-* 5  Have player data persistence using some form of identification
-* 3  Do client side prediction
-* 2  Allow for headless server
+* Able to transition between levels when each is won
+* Allow server and client connection in main menu
+* Have player data persistence using some form of identification
+* Simulate latency between connections
+* Do client side prediction
+* Allow for headless server
 
 
 
 Done:
-* 10 Add timeout on server connect from client
-* 8  Add different kinds of game states (main menu, a UI, playing level, etc)
+* Add performance statistics in debug window
+* Create a timeline struct to make frame execution frequency more clear
+* Make a main menu, pause menu, and win/loss menu (full game loop)
+* Add timeout on server connect from client
+* Add different kinds of game states (main menu, a UI, playing level, etc)

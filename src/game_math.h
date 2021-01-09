@@ -83,6 +83,7 @@ namespace GameMath
     float lerp(float a, float b, float t);
     float inv_lerp(float a, float b, float t);
     float remap(float a, float from_min, float from_max, float to_min, float to_max);
+    float average(float *values, int num);
 
 
 

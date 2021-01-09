@@ -53,6 +53,11 @@ struct Platform
 
     struct Input
     {
+        enum class Key
+        {
+            SHIFT = 0x10,
+        };
+
         static bool key_down(int button);
         static bool key_up(int button);
         static bool key(int button);
