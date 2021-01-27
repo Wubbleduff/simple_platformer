@@ -23,9 +23,9 @@ using namespace GameMath;
 typedef std::map<int, char *> LevelFilessMap;
 static LevelFilessMap level_files =
 {
-    {0, "data/levels/level_0"},
-    {1, "data/levels/level_1"},
-    {2, "data/levels/level_2"}
+    {0, "assets/data/levels/level_0"},
+    {1, "assets/data/levels/level_1"},
+    {2, "assets/data/levels/level_2"}
 };
 
 
@@ -65,6 +65,7 @@ static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
 }
 
 
+#pragma region Grid
 
 void Level::Grid::Cell::reset()
 {
@@ -165,7 +166,11 @@ Level::v2i Level::Grid::grid_coordinate_to_memory_coordinate(v2i grid_coord)
     return result;
 }
 
+#pragma endregion
 
+
+
+#pragma region Avatar
 
 void Level::Avatar::reset(Level *level)
 {
@@ -337,6 +342,8 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
     }
 }
 
+#pragma endregion
+
 
 
 void Level::step(GameInputList inputs, float time_step)
@@ -396,19 +403,19 @@ void Level::edit_draw()
     general_draw();
 
     ImGui::Begin("Editor");
-    static char load_buff[64] = "data/levels/";
+    static char load_buff[64] = "assets/data/levels/";
     if(ImGui::InputText("Load level", load_buff, sizeof(load_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
     {
         load_with_file(load_buff, true);
     }
 
-    static char save_buff[64] = "data/levels/";
+    static char save_buff[64] = "assets/data/levels/";
     if(ImGui::InputText("Save level", save_buff, sizeof(save_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
     {
         load_with_file(save_buff, false);
     }
 
-    static char level_0_buff[64] = "data/levels/";
+    static char level_0_buff[64] = "assets/data/levels/";
     if(ImGui::InputText("Set level 0", level_0_buff, sizeof(level_0_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
     {
         // TODO: Temporary leak until the level table is formailzed
@@ -538,6 +545,24 @@ void Level::cleanup()
     delete [] grid.cells;
 }
 
+#if DEBUG
+void Level::draw_debug_ui()
+{
+    if(ImGui::BeginTabItem("Level"))
+    {
+        static char load_level_buff[64] = "assets/data/levels/";
+        if(ImGui::InputText("Set level 0", load_level_buff, sizeof(load_level_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            // TODO: Temporary leak until the level table is formailzed
+            char *file_path = new char[64];
+            strcpy(file_path, load_level_buff);
+            load_with_file(load_level_buff, true);
+        }
+        ImGui::EndTabItem();
+    }
+}
+#endif
+
 Level::Avatar *Level::add_avatar(GameInput::UID id)
 {
     Avatar *new_avatar = new Avatar();
@@ -632,6 +657,37 @@ void Level::playing_draw()
     general_draw();
 }
 
+static void begin_base_menu()
+{
+    ImGuiWindowFlags window_flags = 0;
+    window_flags |= ImGuiWindowFlags_NoTitleBar;
+    window_flags |= ImGuiWindowFlags_NoScrollbar;
+    //window_flags |= ImGuiWindowFlags_MenuBar;
+    window_flags |= ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoResize;
+    window_flags |= ImGuiWindowFlags_NoCollapse;
+    window_flags |= ImGuiWindowFlags_NoNav;
+    //window_flags |= ImGuiWindowFlags_NoBackground;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus;
+    bool *p_open = NULL;
+
+    ImGui::SetNextWindowPos( ImVec2(0, 0) );
+    ImGui::SetNextWindowSize( ImVec2(Platform::Window::screen_width(), Platform::Window::screen_height()) );
+    ImGui::Begin("Menu", p_open, window_flags);
+}
+
+static void end_base_menu()
+{
+    ImGui::End();
+}
+
+static ImVec2 get_button_size()
+{
+    float button_scalar = Platform::Window::screen_width() * 0.1f;
+    ImVec2 button_size = ImVec2(button_scalar, button_scalar * 0.25f);
+    return button_size;
+}
+
 void Level::paused_draw()
 {
     general_draw();
@@ -646,34 +702,43 @@ void Level::paused_draw()
 
 void Level::win_draw()
 {
-    ImGui::Begin("You win!!!");
+    general_draw();
+
+    begin_base_menu();
+
+    ImVec2 button_size = get_button_size();
+
     int next_level_num = number + 1;
     if(next_level_num < level_files.size())
     {
-        if(ImGui::Button("Next Level"))
+        if(ImGui::Button("Next Level", button_size))
         {
             reset(next_level_num);
             change_mode(PLAYING);
         }
     }
-    if(ImGui::Button("Main Menu")) Game::exit_to_main_menu();
-    if(ImGui::Button("Quit Game")) Game::stop();
-    ImGui::End();
+    if(ImGui::Button("Main Menu", button_size)) Game::exit_to_main_menu();
+    if(ImGui::Button("Quit Game", button_size)) Game::stop();
+
+    end_base_menu();
 }
 
 void Level::loss_draw()
 {
     general_draw();
 
-    ImGui::Begin("You lose!");
-    if(ImGui::Button("Restart"))
+    begin_base_menu();
+
+    ImVec2 button_size = get_button_size();
+    if(ImGui::Button("Restart", button_size))
     {
         reset(0);
         change_mode(PLAYING);
     }
-    if(ImGui::Button("Main Menu")) Game::exit_to_main_menu();
-    if(ImGui::Button("Quit Game")) Game::stop();
-    ImGui::End();
+    if(ImGui::Button("Main Menu", button_size)) Game::exit_to_main_menu();
+    if(ImGui::Button("Quit Game", button_size)) Game::stop();
+
+    end_base_menu();
 }
 
 void Level::general_draw()
@@ -723,17 +788,6 @@ void Level::general_draw()
             }
         }
     }
-
-    ImGui::Begin("Debug");
-    static char load_level_buff[64] = "data/levels/";
-    if(ImGui::InputText("Set level 0", load_level_buff, sizeof(load_level_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        // TODO: Temporary leak until the level table is formailzed
-        char *file_path = new char[64];
-        strcpy(file_path, load_level_buff);
-        load_with_file(load_level_buff, true);
-    }
-    ImGui::End();
 }
 
 void Level::load_with_file(const char *path, bool reading)
@@ -774,3 +828,4 @@ void destroy_level(Level *level)
     level->cleanup();
     delete level;
 }
+

@@ -214,6 +214,13 @@ void use_shader(Shader *shader)
     check_gl_errors("use program");
 }
 
+void set_uniform(Shader *shader, const char *name, v2 value)
+{
+    GLint loc = glGetUniformLocation(shader->program, name);
+    glUniform2f(loc, value.x, value.y);
+    if(loc == -1) Log::log_error("Could not find uniform \"%s\"", name);
+}
+
 void set_uniform(Shader *shader, const char *name, v4 value)
 {
     GLint loc = glGetUniformLocation(shader->program, name);

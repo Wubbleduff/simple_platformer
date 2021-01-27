@@ -59,6 +59,10 @@ struct GameState
     void check_for_mode_switch();
     void serialize_into(Serialization::Stream *stream, GameInput::UID uid);
     void deserialize_from(Serialization::Stream *stream);
+
+#if DEBUG
+    void draw_debug_ui();
+#endif
 };
 
 struct Timeline
@@ -237,8 +241,6 @@ void GameState::check_for_mode_switch()
 
 void GameState::step(std::vector<GameInput> *inputs, GameInput::UID focus_uid, float time_step)
 {
-    check_for_mode_switch();
-
     inputs_this_frame = *inputs;
     my_uid = focus_uid;
 
@@ -344,25 +346,81 @@ void GameState::init_for_playing_level(bool initting)
     }
 }
 
+#if DEBUG
+void GameState::draw_debug_ui()
+{
+    switch(current_mode)
+    {
+    case Mode::MAIN_MENU:
+        break;
+    case Mode::PLAYING_LEVEL:
+        playing_level->draw_debug_ui();
+        break;
+    case Mode::EDITING:
+        playing_level->edit_draw();
+        break;
+    }
+}
+#endif
+
 void MenuState::step(float time_step)
 {
 }
 
 void MenuState::draw()
 {
-    ImGui::Begin("Main Menu");
-    if(ImGui::Button("Start Game"))
+    ImGuiWindowFlags window_flags = 0;
+    window_flags |= ImGuiWindowFlags_NoTitleBar;
+    window_flags |= ImGuiWindowFlags_NoScrollbar;
+    //window_flags |= ImGuiWindowFlags_MenuBar;
+    window_flags |= ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoResize;
+    window_flags |= ImGuiWindowFlags_NoCollapse;
+    window_flags |= ImGuiWindowFlags_NoNav;
+    //window_flags |= ImGuiWindowFlags_NoBackground;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus;
+    bool *p_open = NULL;
+
+    ImGui::SetNextWindowPos( ImVec2(0, 0) );
+    ImGui::SetNextWindowSize( ImVec2(Platform::Window::screen_width(), Platform::Window::screen_height()) );
+    ImGui::Begin("Main Menu", p_open, window_flags);
+    float button_scalar = Platform::Window::screen_width() * 0.2f;
+    ImVec2 button_size = ImVec2(button_scalar, button_scalar * 0.25f);
+    if(ImGui::Button("Start game", button_size))
     {
         Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
     }
-    if(ImGui::Button("Edit Game"))
+    static char address_string[16] = "127.0.0.1";
+    if(ImGui::Button("Start game as client", button_size))
     {
-        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::EDITING);
+        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
+        Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
+        Game::program_state->client.connect_to_server(address_string, SERVER_PORT);
     }
-    if(ImGui::Button("Quit Game"))
+    ImGui::SameLine();
+    ImGui::InputText("Address", address_string, sizeof(address_string), 0);
+
+    if(ImGui::Button("Start game as server", button_size))
+    {
+        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
+        Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+    }
+
+    for(int i = 0; i < 12; i++) ImGui::Spacing();
+    if(ImGui::Button("Quit game", button_size))
     {
         Game::stop();
     }
+
+
+#if DEBUG
+    for(int i = 0; i < 12; i++) ImGui::Spacing();
+    if(ImGui::Button("Edit Game", button_size))
+    {
+        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::EDITING);
+    }
+#endif
+
     ImGui::End();
 }
 
@@ -541,45 +599,60 @@ void ProgramState::step_as_offline(float time_step)
 
     std::vector<GameInput> input_list = {local_input};
 
+    current_game_state->check_for_mode_switch();
+
     current_game_state->step(&input_list, 0, time_step);
 
     // Do drawing
     {
+
         Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
         Graphics::ImGuiImplementation::new_frame();
-        ImGui::Begin("Debug");
-
         current_game_state->draw();
 
-        ImGui::Text("OFFLINE");
-
-        if(ImGui::Button("Switch to client")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
-        if(ImGui::Button("Switch to server")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
-
-        ImGui::Begin("Frame times");
-#if 0
-        for(int i = 0; i < Game::program_state->timeline->step_times.size(); i++)
+#if DEBUG
         {
-            float step_time = Game::program_state->timeline->step_times[i];
+            ImGui::Begin("Debug");
 
-            ImGui::Text("Time: %f", step_time);
+            if(ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_None))
+            {
+                if(ImGui::BeginTabItem("Networking"))
+                {
+                    ImGui::Text("OFFLINE");
+                    if(ImGui::Button("Switch to client")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
+                    if(ImGui::Button("Switch to server")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+                    ImGui::EndTabItem();
+                }
+                if(ImGui::BeginTabItem("Console"))
+                {
+                    GameConsole::draw();
+                    ImGui::EndTabItem();
+                }
+                if(ImGui::BeginTabItem("Frame times"))
+                {
+                    float avg = GameMath::average(Game::program_state->timeline->step_times.data(), Game::program_state->timeline->step_times.size());
+                    ImGui::Text("Average step time: %f", avg);
+                    ImGui::PlotHistogram("Step Times", Game::program_state->timeline->step_times.data(), Game::program_state->timeline->step_times.size(), 0, 0, 0.0f, 0.032f, ImVec2(512.0f, 256.0f));
+                    ImGui::EndTabItem();
+                }
+
+                current_game_state->draw_debug_ui();
+
+                ImGui::EndTabBar();
+            }
+
+            ImGui::End(); // Debug
         }
 #endif
-        float avg = GameMath::average(Game::program_state->timeline->step_times.data(), Game::program_state->timeline->step_times.size());
-        ImGui::Text("Average step time: %f", avg);
-        ImGui::PlotHistogram("Step Times", Game::program_state->timeline->step_times.data(), Game::program_state->timeline->step_times.size(), 0, 0, 0.0f, 0.032f, ImVec2(512.0f, 256.0f));
-        ImGui::End();
 
-        GameConsole::draw();
 
-        ImGui::End();
         Graphics::ImGuiImplementation::end_frame();
         Graphics::swap_frames();
     }
 }
 
 void ProgramState::step_as_client(float time_step)
-{
+{ 
     Game::program_state->client.update_connection(time_step);
 
     // Send the local player's input to the server
@@ -596,11 +669,15 @@ void ProgramState::step_as_client(float time_step)
         Serialization::free_stream(input_stream);
     }
 
+    current_game_state->check_for_mode_switch();
+
 #define CLIENT_PREDICTION 0
 #if CLIENT_PREDICTION
     // Step the game forward in time
     // ...
 #endif
+
+    
 
     // Read server's game state
     if(Game::program_state->client.is_connected())
@@ -631,46 +708,81 @@ void ProgramState::step_as_client(float time_step)
 
         Serialization::free_stream(game_stream);
     }
+    else
+    {
+        GameInputList inputs;
+        unsigned int focus = 0;
+        current_game_state->step(&inputs, focus, time_step);
+    }
 
     // Draw
     {
         Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
         Graphics::ImGuiImplementation::new_frame();
-        ImGui::Begin("Debug");
 
-        ImGui::Text("CLIENT");
-
-        if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
-        if(ImGui::Button("Switch to server"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
 
         bool game_state_still_valid = true;
-        static char address_string[16] = "127.0.0.1";
-        ImGui::InputText("Address", address_string, sizeof(address_string), 0);
-        if(Game::program_state->client.is_connected())
-        {
-            if(ImGui::Button("Disconnect from server"))
-            {
-                Game::program_state->client.disconnect_from_server();
-                game_state_still_valid = false;
-            }
-        }
-        else
-        {
 
-            if(ImGui::Button("Connect to server"))
+#if DEBUG
+        {
+            ImGui::Begin("Debug");
+
+            if(ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_None))
             {
-                Game::program_state->client.connect_to_server(address_string, SERVER_PORT);
+                if(ImGui::BeginTabItem("Networking"))
+                {
+                    ImGui::Text("CLIENT");
+
+                    if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
+                    if(ImGui::Button("Switch to server"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+
+                    
+                    static char address_string[16] = "127.0.0.1";
+                    ImGui::InputText("Address", address_string, sizeof(address_string), 0);
+                    if(Game::program_state->client.is_connected())
+                    {
+                        if(ImGui::Button("Disconnect from server"))
+                        {
+                            Game::program_state->client.disconnect_from_server();
+                            game_state_still_valid = false;
+                        }
+                    }
+                    else
+                    {
+                        if(ImGui::Button("Connect to server"))
+                        {
+                            Game::program_state->client.connect_to_server(address_string, SERVER_PORT);
+                        }
+                    }
+
+                    ImGui::EndTabItem(); // Networking
+                }
+                if(ImGui::BeginTabItem("Console"))
+                {
+                    GameConsole::draw();
+                    ImGui::EndTabItem(); // Console
+                }
+                if(ImGui::BeginTabItem("Frame times"))
+                {
+                    ImGui::EndTabItem(); // Frame times
+                }
+
+                current_game_state->draw_debug_ui();
+
+                ImGui::EndTabBar(); // ##tabs
             }
+
+            ImGui::End(); // Debug
         }
+#endif
+
 
         if(game_state_still_valid)
         {
             current_game_state->draw();
         }
 
-        GameConsole::draw();
 
-        ImGui::End();
         Graphics::ImGuiImplementation::end_frame();
         Graphics::swap_frames();
     }
@@ -678,6 +790,8 @@ void ProgramState::step_as_client(float time_step)
 
 void ProgramState::step_as_server(float time_step)
 {
+    
+
     // Accept new connections to the server
     std::vector<Network::Connection *> new_connections = Network::accept_client_connections();
     for(int i = 0; i < new_connections.size(); i++)
@@ -709,6 +823,8 @@ void ProgramState::step_as_server(float time_step)
     // Clean out disconnected connections
     Game::program_state->server.remove_disconnected_clients();
 
+    current_game_state->check_for_mode_switch();
+
     // Step the game state using all inputs
     current_game_state->step(&this_frames_inputs, 0, time_step);
 
@@ -730,18 +846,42 @@ void ProgramState::step_as_server(float time_step)
     {
         Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
         Graphics::ImGuiImplementation::new_frame();
-        ImGui::Begin("Debug");
-
-        ImGui::Text("SERVER");
-
-        if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
-        if(ImGui::Button("Switch to client"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
-
         current_game_state->draw();
 
-        GameConsole::draw();
+#if DEBUG
 
-        ImGui::End();
+
+
+        {
+            ImGui::Begin("Debug");
+
+            if(ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_None))
+            {
+                if(ImGui::BeginTabItem("Networking"))
+                {
+                    if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
+                    if(ImGui::Button("Switch to client"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
+                    ImGui::EndTabItem();
+                }
+                if(ImGui::BeginTabItem("Console"))
+                {
+                    GameConsole::draw();
+                    ImGui::EndTabItem();
+                }
+                if(ImGui::BeginTabItem("Frame times"))
+                {
+                    ImGui::EndTabItem();
+                }
+
+                current_game_state->draw_debug_ui();
+
+                ImGui::EndTabBar();
+            }
+
+            ImGui::End(); // Debug
+        }
+#endif
+
         Graphics::ImGuiImplementation::end_frame();
         Graphics::swap_frames();
     }

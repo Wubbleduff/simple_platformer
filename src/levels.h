@@ -95,6 +95,10 @@ public:
     void change_mode(Mode new_mode);
     void cleanup();
 
+#if DEBUG
+    void draw_debug_ui();
+#endif
+
 
 private:
     Avatar *Level::add_avatar(GameInput::UID id);

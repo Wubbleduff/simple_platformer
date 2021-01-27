@@ -428,7 +428,7 @@ void Network::Connection::update_receive_state()
 
         char *receive_buffer_end = receive_buffer + RECEIVE_BUFFER_SIZE;
         // Make sure the receive buffer is large enough for the bytes to read in
-        assert(receive_target + receive_up_to_bytes < receive_buffer_end);
+        assert(receive_buffer_end - receive_target >= receive_up_to_bytes);
 
         int received_bytes;
         received_new_data = read_bytes_from_socket(tcp_socket,

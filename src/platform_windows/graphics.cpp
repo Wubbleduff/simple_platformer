@@ -13,6 +13,8 @@
 #include <windows.h>
 #include <assert.h>
 
+#include "levels.h"
+
 
 
 using namespace GameMath;
@@ -474,7 +476,7 @@ void Graphics::init()
         for(int i = 0; i < CIRCLE_MESH_RESOLUTION; i++)
         {
             float theta = remap(i, 0.0f, CIRCLE_MESH_RESOLUTION - 1.0f, 0.0f, 2.0f * PI);
-            circle_vs[i] = { v2(cos(theta), sin(theta)) };
+            circle_vs[i] = { v2(GameMath::cos(theta), GameMath::sin(theta)) };
         }
         for(int i = 0; i < CIRCLE_MESH_RESOLUTION; i++) circle_is[i] = i;
         instance->circle_mesh = make_mesh(CIRCLE_MESH_RESOLUTION, circle_vs, CIRCLE_MESH_RESOLUTION, circle_is, GL_LINE_STRIP);

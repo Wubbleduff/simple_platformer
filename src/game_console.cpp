@@ -49,7 +49,7 @@ void GameConsole::write(const char *text, v3 color)
 
 void GameConsole::draw()
 {
-    ImGui::Begin("Console");
+    ImGui::BeginChild("Console", ImVec2(0, 0), true);
 
     for(int i = 0; i < instance->entries.size(); i++)
     {
@@ -60,6 +60,6 @@ void GameConsole::draw()
 
     ImGui::SetScrollHereY(1.0f);
 
-    ImGui::End();
+    ImGui::EndChild();
 }
 
