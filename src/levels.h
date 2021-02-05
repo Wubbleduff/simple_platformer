@@ -7,6 +7,7 @@
 
 #include <map>
 
+
 struct Level
 {
 public:
@@ -23,6 +24,7 @@ public:
 
         v2i operator+(v2i b) { return v2i(x + b.x, y + b.y); }
         v2i operator-(v2i b) { return v2i(x - b.x, y - b.y); }
+        bool operator==(v2i b) { return (this->x == b.x) && (this->y == b.y); }
     };
 
     struct Grid
@@ -33,23 +35,28 @@ public:
             bool win_when_touched;
 
             void reset();
-            void serialize(Serialization::Stream *stream, bool writing = true);
+        };
+
+        struct v2iComp
+        {
+            bool operator()(const v2i &a, const v2i &b) const
+            {
+                if(a.x == b.x) return a.y < b.y;
+                else return a.x < b.x;
+            }
         };
 
         // How big is a grid cell in world space?
         float world_scale;
-        int width, height;
-        Cell *cells;
+        std::map<v2i, Cell *, v2iComp> cells_map;
 
-        void init(int w, int h);
+        void init();
         void clear();
-        Cell *at(v2i pos);
-        bool valid_position(v2i pos);
+        Cell *at(Level::v2i pos);
+        void set_filled(Level::v2i pos, bool fill);
         GameMath::v2 cell_to_world(v2i pos);
         v2i world_to_cell(GameMath::v2 pos);
-        v2i bottom_left();
-        v2i top_right();
-        v2i grid_coordinate_to_memory_coordinate(v2i grid_coord);
+        void serialize(Serialization::Stream *stream, bool writing = true);
     };
 
     struct Avatar
@@ -71,6 +78,13 @@ public:
         void check_and_resolve_collisions(Level *level);
     };
 
+    struct EditState
+    {
+        GameMath::v2 camera_position = GameMath::v2();
+
+        GameMath::v2 last_mouse_position = GameMath::v2();
+    };
+
     enum Mode
     {
         PLAYING,
@@ -83,6 +97,7 @@ public:
     Grid grid;
     std::map<GameInput::UID, Avatar *> avatars;
     Mode current_mode;
+    EditState edit_state;
 
     void step(GameInputList inputs, float time_step);
     void edit_step(float time_step);

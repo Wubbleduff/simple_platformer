@@ -73,52 +73,33 @@ void Level::Grid::Cell::reset()
     win_when_touched = false;
 }
 
-void Level::Grid::Cell::serialize(Serialization::Stream *stream, bool writing)
+void Level::Grid::init()
 {
-    if(writing)
-    {
-        stream->write(filled ? 1 : 0);
-        stream->write(win_when_touched ? 1 : 0);
-    }
-    else
-    {
-        int val;
-        stream->read(&val);
-        filled = (val == 0 ? false : true);
-
-        stream->read(&val);
-        win_when_touched = (val == 0 ? false : true);
-    }
-}
-
-void Level::Grid::init(int w, int h)
-{
-    delete[] cells;
-    width = w;
-    height = h;
-    cells = new Cell[w * h];
 }
 
 void Level::Grid::clear()
 {
-    for(int i = 0; i < width * height; i++) cells[i].reset();
+    cells_map.clear();
 }
 
 Level::Grid::Cell *Level::Grid::at(v2i pos)
 {
-    bool valid = valid_position(pos);
-    assert(valid);
-
-    v2i memory_coord = grid_coordinate_to_memory_coordinate(pos);
-    return &(cells[memory_coord.y * width + memory_coord.x]);
+    std::map<v2i, Cell *>::iterator it = cells_map.find(pos);
+    if(it == cells_map.end())
+    {
+        return nullptr;
+    }
+    else
+    {
+        return it->second;
+    }
 }
 
-bool Level::Grid::valid_position(v2i pos)
+void Level::Grid::set_filled(Level::v2i pos, bool fill)
 {
-    v2i memory_coord = grid_coordinate_to_memory_coordinate(pos);
-    if(memory_coord.x < 0 || memory_coord.x >= width)  return false;
-    if(memory_coord.y < 0 || memory_coord.y >= height) return false;
-    return true;
+    Cell *cell = cells_map[pos];
+    if(!cell) cells_map[pos] = new Cell();
+    cells_map[pos]->filled = fill;
 }
 
 v2 Level::Grid::cell_to_world(v2i pos)
@@ -131,39 +112,49 @@ Level::v2i Level::Grid::world_to_cell(v2 pos)
 {
     pos *= (1.0f / world_scale);
     v2i cell = v2i((int)pos.x, (int)pos.y); // Should return the bottom left of a grid cell in the world
+    if(pos.x < 0.0f) cell.x -= 1;
+    if(pos.y < 0.0f) cell.y -= 1;
     return cell;
 }
 
-Level::v2i Level::Grid::bottom_left()
+void Level::Grid::serialize(Serialization::Stream *stream, bool writing)
 {
-    return {-width / 2, -height / 2};
-}
+    if(writing)
+    {
+        stream->write(world_scale);
+        stream->write((int)cells_map.size());
+        for(auto &pair : cells_map)
+        {
+            v2i pos = v2i(pair.first.x, pair.first.y);
+            const Cell *cell = pair.second;
 
-Level::v2i Level::Grid::top_right()
-{
-    return {width / 2 - 1, height / 2 - 1};
-}
+            stream->write(pos.x);
+            stream->write(pos.y);
+            stream->write(cell->filled ? 1 : 0);
+            //stream->write(cell->win_when_touched);
+        }
+    }
+    else
+    {
+        stream->read(&world_scale);
+        int size;
+        stream->read(&size);
+        for(int i = 0; i < size; i++)
+        {
+            v2i pos;
+            stream->read(&pos.x);
+            stream->read(&pos.y);
 
-Level::v2i Level::Grid::grid_coordinate_to_memory_coordinate(v2i grid_coord)
-{
-    /*             X  Y
-     * get 0, 0 -> 4, 3
-          0 1 2 3 4 5 6 7
-        0
-        1
-        2
-        3       x x <-- will pick this one if width and height are even (top-left one)
-        4       x x
-        5
-        6
-        7
-        
-    */
-    v2i result = grid_coord;
-    result.x += width / 2;  // Move selection to middle of memory grid
-    result.y = (height - 1) - result.y; // Invert the y selection
-    result.y -= height / 2; // Move selection to middle of memory grid
-    return result;
+            int filled_val;
+            stream->read(&filled_val);
+            //int win_when_touched;
+            //stream->read(&win_when_touched);
+
+            bool filled = filled_val == 0 ? false : true;
+            set_filled(pos, filled);
+        }
+    }
+
 }
 
 #pragma endregion
@@ -174,7 +165,7 @@ Level::v2i Level::Grid::grid_coordinate_to_memory_coordinate(v2i grid_coord)
 
 void Level::Avatar::reset(Level *level)
 {
-    position = v2(5, 20);
+    position = v2(0, 4);
     grounded = false;
     horizontal_velocity = 0.0f;
     vertical_velocity = 0.0f;
@@ -258,6 +249,8 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
     {
         for(pos.x = bl.x; pos.x <= tr.x; pos.x++)
         {
+            if(level->grid.at(pos) == nullptr) continue;
+
             if(level->grid.at(pos)->filled)
             {
                 v2 cell_world_position = level->grid.cell_to_world(pos);
@@ -272,7 +265,7 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
                     v2 n_dir = normalize(dir);
                     v2i dir_i = v2i((int)(n_dir.x), (int)(n_dir.y));
                     v2i pos_in_question = pos + dir_i;
-                    if(level->grid.valid_position(pos_in_question) && level->grid.at(pos_in_question)->filled)
+                    if(level->grid.at(pos_in_question) && level->grid.at(pos_in_question)->filled)
                     {
                         blocked = true;
                     }
@@ -359,26 +352,34 @@ void Level::step(GameInputList inputs, float time_step)
 
 void Level::edit_step(float time_step)
 {
+    int x;
+    int y;
+    Platform::Input::mouse_screen_position(&x, &y);
+    v2 mouse_pos = v2(x, y);
+    if(Platform::Input::key(' '))
+    {
+        v2 mouse_delta = mouse_pos - edit_state.last_mouse_position;
+        mouse_delta.y *= -1.0f;
+        edit_state.camera_position += -mouse_delta * 0.05f;
+    }
+    edit_state.last_mouse_position = mouse_pos;
+
+    Graphics::set_camera_position(edit_state.camera_position);
+
     if(Platform::Input::key('Q'))
     {
         v2 pos = Platform::Input::mouse_world_position();
         v2i grid_pos = grid.world_to_cell(pos);
-        if(grid.valid_position(grid_pos))
-        {
-            bool fill = !Platform::Input::key((int)Platform::Input::Key::SHIFT);
-            grid.at(grid_pos)->filled = fill;
-        }
+        bool fill = !Platform::Input::key((int)Platform::Input::Key::SHIFT);
+        grid.set_filled(grid_pos, true);
     }
 
     if(Platform::Input::key('W'))
     {
         v2 pos = Platform::Input::mouse_world_position();
         v2i grid_pos = grid.world_to_cell(pos);
-        if(grid.valid_position(grid_pos))
-        {
-            bool fill = !Platform::Input::key((int)Platform::Input::Key::SHIFT);
-            grid.at(grid_pos)->win_when_touched = fill;
-        }
+        bool fill = !Platform::Input::key((int)Platform::Input::Key::SHIFT);
+        grid.set_filled(grid_pos, false);
     }
 
     if(Platform::Input::key_down('M'))
@@ -439,13 +440,7 @@ void Level::serialize(Serialization::Stream *stream)
         stream->write(avatar->color);
     }
 
-    stream->write(grid.width);
-    stream->write(grid.height);
-    stream->write(grid.world_scale);
-    for(int i = 0; i < grid.width * grid.height; i++)
-    {
-        grid.cells[i].serialize(stream, true);
-    }
+    grid.serialize(stream, true);
 }
 
 void Level::deserialize(Serialization::Stream *stream)
@@ -490,15 +485,7 @@ void Level::deserialize(Serialization::Stream *stream)
         uids_to_remove.pop_back();
     }
 
-    int w, h;
-    stream->read(&w);
-    stream->read(&h);
-    grid.init(w, h);
-    stream->read(&grid.world_scale);
-    for(int i = 0; i < grid.width * grid.height; i++)
-    {
-        grid.cells[i].serialize(stream, false);
-    }
+    grid.serialize(stream, false);
 }
 
 void Level::reset(int level_num)
@@ -520,12 +507,12 @@ void Level::reset(int level_num)
 
 void Level::reset_to_default_level()
 {
-    grid.init(256, 64);
+    grid.init();
     grid.world_scale = 1.0f;
     grid.clear();
-    for(v2i pos = {0, 0}; pos.x < grid.width / 2; pos.x++)
+    for(v2i pos = {-10, 0}; pos.x <= 10; pos.x++)
     {
-        grid.at(pos)->filled = true;
+        grid.set_filled(pos, true);
     }
 
     for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
@@ -542,7 +529,6 @@ void Level::change_mode(Mode new_mode)
 
 void Level::cleanup()
 {
-    delete [] grid.cells;
 }
 
 #if DEBUG
@@ -762,30 +748,27 @@ void Level::general_draw()
     }
 
     // Draw grid terrain
-    v2i bl = grid.bottom_left();
-    v2i tr = grid.top_right();
-    for(v2i pos = bl; pos.y <= tr.y; pos.y++)
+    for(auto &pair : grid.cells_map)
     {
-        for(pos.x = bl.x; pos.x <= tr.x; pos.x++)
+        v2i pos = v2i(pair.first.x, pair.first.y);
+        Grid::Cell *cell = pair.second;
+        if(cell->filled)
         {
-            if(grid.at(pos)->filled)
-            {
-                float inten = (float)pos.x / grid.width;
-                v4 color = v4(1.0f - inten, 0.0f, inten, 1.0f);
-                if(pos.x == grid.width / 2) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
+            float inten = (float)pos.x / 100.0f;
+            v4 color = v4(1.0f - inten, 0.0f, inten, 1.0f);
+            if(pos == v2i(0, 0)) color = v4(1.0f, 1.0f, 1.0f, 1.0f);
 
-                v2 world_pos = grid.cell_to_world(pos) + v2(1.0f, 1.0f) * grid.world_scale / 2.0f;
-                float scale = grid.world_scale * 0.95f;
-                Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
-            }
+            v2 world_pos = grid.cell_to_world(pos) + v2(1.0f, 1.0f) * grid.world_scale / 2.0f;
+            float scale = grid.world_scale * 0.95f;
+            Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
+        }
 
-            if(grid.at(pos)->win_when_touched)
-            {
-                v4 color = v4(0.0f, 1.0f, 0.0f, 1.0f);
-                v2 world_pos = grid.cell_to_world(pos) + v2(1.0f, 1.0f) * grid.world_scale / 2.0f;
-                float scale = grid.world_scale * 0.95f;
-                Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
-            }
+        if(cell->win_when_touched)
+        {
+            v4 color = v4(0.0f, 1.0f, 0.0f, 1.0f);
+            v2 world_pos = grid.cell_to_world(pos) + v2(1.0f, 1.0f) * grid.world_scale / 2.0f;
+            float scale = grid.world_scale * 0.95f;
+            Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
         }
     }
 }

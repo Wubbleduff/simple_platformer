@@ -271,15 +271,6 @@ float Platform::Window::aspect_ratio()
     return (float)instance->window.width / instance->window.height; 
 }
 
-void Platform::Window::mouse_screen_position(int *x, int *y)
-{
-    POINT window_client_pos;
-    BOOL success = GetCursorPos(&window_client_pos);
-    success = ScreenToClient(instance->window.handle, &window_client_pos);
-    *x = window_client_pos.x;
-    *y = window_client_pos.y;
-}
-
 template<typename T>
 static T *allocx(int num)
 {
@@ -501,7 +492,7 @@ bool Platform::Input::mouse_button(int key)
 GameMath::v2 Platform::Input::mouse_world_position()
 {
     int sx, sy;
-    Platform::Window::mouse_screen_position(&sx, &sy);
+    Platform::Input::mouse_screen_position(&sx, &sy);
     GameMath::v2 p = GameMath::v2((float)sx, (float)sy);
     float screen_width = Platform::Window::screen_width();
     float screen_height = Platform::Window::screen_height();
@@ -515,6 +506,15 @@ GameMath::v2 Platform::Input::mouse_world_position()
     };
 
     return Graphics::ndc_point_to_world(ndc);
+}
+
+void Platform::Input::mouse_screen_position(int *x, int *y)
+{
+    POINT window_client_pos;
+    BOOL success = GetCursorPos(&window_client_pos);
+    success = ScreenToClient(instance->window.handle, &window_client_pos);
+    *x = window_client_pos.x;
+    *y = window_client_pos.y;
 }
 
 

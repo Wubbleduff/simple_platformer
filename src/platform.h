@@ -19,7 +19,7 @@ struct Platform
         static int screen_height();
         static int monitor_frequency();
         static float aspect_ratio();
-        static void mouse_screen_position(int *x, int *y);
+        //static void mouse_screen_position(int *x, int *y);
     };
 
     // Memory management
@@ -65,6 +65,7 @@ struct Platform
         static bool mouse_button_up(int button);
         static bool mouse_button(int button);
         static GameMath::v2 mouse_world_position();
+        static void mouse_screen_position(int *x, int *y);
         static void read_input();
         static void record_key_event(int vk_code, bool state);
         static void record_mouse_event(int vk_code, bool state);
