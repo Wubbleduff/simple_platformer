@@ -51,14 +51,16 @@ struct GameState
     MenuState *menu_state; // For main menu, win/lose screen, etc. (What about pause menu? idk...)
     Level *playing_level;  // For when the player is playing the game
 
-    void step(std::vector<GameInput> *inputs, GameInput::UID focus_uid, float time_step);
+    void read_input_as_offline();
+    void read_input_as_client();
+    void read_input_as_server();
+    void step(GameInput::UID focus_uid, float time_step);
     void draw();
     void switch_game_mode(GameState::Mode mode);
+    void check_for_mode_switch();
     void init_for_main_menu(bool initting);
     void init_for_playing_level(bool initting);
-    void check_for_mode_switch();
-    void serialize_into(Serialization::Stream *stream, GameInput::UID uid);
-    void deserialize_from(Serialization::Stream *stream);
+    void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
 
 #if DEBUG
     void draw_debug_ui();
@@ -150,32 +152,48 @@ bool GameInput::action(Action action)
     return current_actions[(int)action];
 }
 
-void GameInput::serialize_into(Serialization::Stream *stream)
+void GameInput::serialize(Serialization::Stream *stream, bool serialize)
 {
-    for(int i = 0; i < (int)Action::NUM_ACTIONS; i++)
+    if(serialize)
     {
-        stream->write((int)current_actions[i]);
-    }
-}
+        for(int i = 0; i < (int)Action::NUM_ACTIONS; i++)
+        {
+            stream->write((int)current_actions[i]);
+        }
 
-void GameInput::deserialize_from(Serialization::Stream *stream)
-{
-    for(int i = 0; i < (int)Action::NUM_ACTIONS; i++)
-    {
-        int value;
-        stream->read(&value);
-        current_actions[i] = (value == 0) ? false : true;
+        stream->write(current_horizontal_movement);
+        stream->write(current_aiming_direction);
     }
+    else
+    {
+        for(int i = 0; i < (int)Action::NUM_ACTIONS; i++)
+        {
+            int value;
+            stream->read(&value);
+            current_actions[i] = (value == 0) ? false : true;
+        }
+
+        stream->read(&current_horizontal_movement);
+        stream->read(&current_aiming_direction);
+    }
+    
 }
 
 void GameInput::read_from_local()
 {
-    current_actions[(int)Action::MOVE_RIGHT] = Platform::Input::key('D');
-    current_actions[(int)Action::MOVE_LEFT] = Platform::Input::key('A');
     current_actions[(int)Action::JUMP] = Platform::Input::key_down(' ');
+    current_actions[(int)Action::SHOOT] = Platform::Input::mouse_button_down(0);
+
+    float h = 0.0f;
+    h -= Platform::Input::key('A') ? 1.0f : 0.0f;
+    h += Platform::Input::key('D') ? 1.0f : 0.0f;
+    current_horizontal_movement = h;
+
+    v2 avatar_pos = Game::program_state->current_game_state->playing_level->get_avatar_position(uid);
+    current_aiming_direction = Platform::Input::mouse_world_position() - avatar_pos;
 }
 
-void GameInput::read_from_connection(Network::Connection **connection)
+bool GameInput::read_from_connection(Network::Connection **connection)
 {
     assert(*connection != nullptr);
 
@@ -187,7 +205,7 @@ void GameInput::read_from_connection(Network::Connection **connection)
     {
         Network::disconnect(connection);
         Serialization::free_stream(input_stream);
-        return;
+        return false;
     }
     else if(result == Network::ReadResult::READY)
     {
@@ -195,10 +213,13 @@ void GameInput::read_from_connection(Network::Connection **connection)
 
         // TODO: Sanitize ...
 
-        deserialize_from(input_stream);
+        serialize(input_stream, false);
+        return true;
     }
 
     Serialization::free_stream(input_stream);
+
+    return false;
 }
 
 
@@ -239,13 +260,103 @@ void GameState::check_for_mode_switch()
     }
 }
 
-void GameState::step(std::vector<GameInput> *inputs, GameInput::UID focus_uid, float time_step)
+void GameState::read_input_as_offline()
 {
-    inputs_this_frame = *inputs;
+    inputs_this_frame.clear();
+
+    switch(current_mode)
+    {
+        case Mode::MAIN_MENU:
+            // ...
+            break;
+
+        case Mode::PLAYING_LEVEL:
+        {
+            // Read input from local player
+            GameInput local_input;
+            local_input.uid = 0;
+            local_input.read_from_local();
+            inputs_this_frame.push_back(local_input);
+        }
+        break;
+
+        case Mode::EDITING:
+            // ...
+            break;
+    }
+
+}
+
+void GameState::read_input_as_client()
+{
+    inputs_this_frame.clear();
+
+    switch(current_mode)
+    {
+        case Mode::MAIN_MENU:
+            // ...
+            break;
+
+        case Mode::PLAYING_LEVEL:
+        {
+            // Read input from local player
+            GameInput local_input;
+            //local_input.uid = 0; This field doesn't matter since we're sending an input list to the server, it will just discard the uid
+            local_input.read_from_local();
+            inputs_this_frame.push_back(local_input);
+        }
+        break;
+
+        case Mode::EDITING:
+            // ...
+            break;
+    }
+}
+
+void GameState::read_input_as_server()
+{
+    inputs_this_frame.clear();
+
+    switch(current_mode)
+    {
+        case Mode::MAIN_MENU:
+            // ...
+            break;
+        case Mode::PLAYING_LEVEL:
+        {
+            // Read local player's input
+            GameInput local_input;
+            local_input.uid = 0;
+            local_input.read_from_local();
+            inputs_this_frame.push_back(local_input);
+
+            // Read remote player's input
+            for(ProgramState::Server::ClientConnection &client : Game::program_state->server.client_connections)
+            {
+                GameInput remote_input;
+                remote_input.uid = client.uid;
+                remote_input.read_from_connection(&(client.connection));
+                if(client.connection != nullptr)
+                {
+                    inputs_this_frame.push_back(remote_input);
+                }
+            }
+            // Clean out disconnected connections
+            Game::program_state->server.remove_disconnected_clients();
+
+        }
+        break;
+
+        case Mode::EDITING:
+            // ...
+            break;
+    }
+}
+
+void GameState::step(GameInput::UID focus_uid, float time_step)
+{
     my_uid = focus_uid;
-
     frame_number++;
-
     switch(current_mode)
     {
         case Mode::MAIN_MENU:
@@ -276,35 +387,38 @@ void GameState::draw()
     }
 }
 
-void GameState::serialize_into(Serialization::Stream *stream, GameInput::UID other_uid)
+void GameState::serialize(Serialization::Stream *stream, GameInput::UID other_uid, bool serialize)
 {
-    assert(current_mode == PLAYING_LEVEL);
-
-    stream->write(other_uid);
-    stream->write(frame_number);
-    stream->write((int)inputs_this_frame.size());
-    for(GameInput &input : inputs_this_frame)
+    if(serialize)
     {
-        input.serialize_into(stream);
+        assert(current_mode == PLAYING_LEVEL);
+
+        stream->write(other_uid);
+        stream->write(frame_number);
+        stream->write((int)inputs_this_frame.size());
+        for(GameInput &input : inputs_this_frame)
+        {
+            input.serialize(stream, true);
+        }
+        playing_level->serialize(stream);
     }
-    playing_level->serialize(stream);
-}
-
-void GameState::deserialize_from(Serialization::Stream *stream)
-{
-    assert(current_mode == PLAYING_LEVEL);
-
-    stream->read(&my_uid);
-    stream->read(&frame_number);
-    int num_inputs;
-    stream->read(&num_inputs);
-    inputs_this_frame.resize(num_inputs);
-    for(int i = 0; i < num_inputs; i++)
+    else
     {
-        GameInput *target = &(inputs_this_frame[i]);
-        target->deserialize_from(stream);
+        assert(current_mode == PLAYING_LEVEL);
+
+        stream->read(&my_uid);
+        stream->read(&frame_number);
+        int num_inputs;
+        stream->read(&num_inputs);
+        inputs_this_frame.resize(num_inputs);
+        for(int i = 0; i < num_inputs; i++)
+        {
+            GameInput *target = &(inputs_this_frame[i]);
+            target->serialize(stream, false);
+        }
+        playing_level->deserialize(stream);
     }
-    playing_level->deserialize(stream);
+
 }
 
 
@@ -592,16 +706,12 @@ void ProgramState::Server::remove_disconnected_clients()
 
 void ProgramState::step_as_offline(float time_step)
 {
-    // Build inputs
-    Platform::Input::read_input();
-    GameInput local_input = {};
-    local_input.read_from_local();
-
-    std::vector<GameInput> input_list = {local_input};
-
     current_game_state->check_for_mode_switch();
 
-    current_game_state->step(&input_list, 0, time_step);
+    Platform::Input::read_input();
+    current_game_state->read_input_as_offline();
+
+    current_game_state->step(0, time_step);
 
     // Do drawing
     {
@@ -653,23 +763,35 @@ void ProgramState::step_as_offline(float time_step)
 
 void ProgramState::step_as_client(float time_step)
 { 
+    current_game_state->check_for_mode_switch();
+
     Game::program_state->client.update_connection(time_step);
 
-    // Send the local player's input to the server
+    // TODO:
+    // Once doing client side prediction, read input using the game state's read_input
+    // like other program states are doing
+
+    
     Platform::Input::read_input();
+
+
+    // Send the local player's input to the server
     if(Game::program_state->client.is_connected())
     {
         Serialization::Stream *input_stream = Serialization::make_stream();
 
-        GameInput local_input;
-        local_input.read_from_local();
-        local_input.serialize_into(input_stream);
-        Game::program_state->client.server_connection->send_stream(input_stream);
+        current_game_state->read_input_as_client();
 
+        for(GameInput &input : current_game_state->inputs_this_frame)
+        {
+            input.serialize(input_stream, true);
+        }
+
+        Game::program_state->client.server_connection->send_stream(input_stream);
         Serialization::free_stream(input_stream);
     }
 
-    current_game_state->check_for_mode_switch();
+    
 
 #define CLIENT_PREDICTION 0
 #if CLIENT_PREDICTION
@@ -703,16 +825,16 @@ void ProgramState::step_as_client(float time_step)
 #endif
 
             // For now, we'll just be a dumb-client
-            current_game_state->deserialize_from(game_stream);
+            // Pass -1 for now  because it doesn't make sense in this context (2/6/2021)
+            current_game_state->serialize(game_stream, -1, false);
         }
 
         Serialization::free_stream(game_stream);
     }
     else
     {
-        GameInputList inputs;
         unsigned int focus = 0;
-        current_game_state->step(&inputs, focus, time_step);
+        current_game_state->step(focus, time_step);
     }
 
     // Draw
@@ -790,7 +912,7 @@ void ProgramState::step_as_client(float time_step)
 
 void ProgramState::step_as_server(float time_step)
 {
-    
+    current_game_state->check_for_mode_switch();
 
     // Accept new connections to the server
     std::vector<Network::Connection *> new_connections = Network::accept_client_connections();
@@ -802,38 +924,17 @@ void ProgramState::step_as_server(float time_step)
 
     // Prepare for reading input
     Platform::Input::read_input();
-    std::vector<GameInput> this_frames_inputs;
-
-    // Read local player's input
-    GameInput local_input = {};
-    local_input.read_from_local();
-    this_frames_inputs.push_back(local_input);
-
-    // Read remote player's input
-    for(ProgramState::Server::ClientConnection &client : Game::program_state->server.client_connections)
-    {
-        GameInput remote_input;
-        remote_input.uid = client.uid;
-        remote_input.read_from_connection(&(client.connection));
-        if(client.connection != nullptr)
-        {
-            this_frames_inputs.push_back(remote_input);
-        }
-    }
-    // Clean out disconnected connections
-    Game::program_state->server.remove_disconnected_clients();
-
-    current_game_state->check_for_mode_switch();
+    current_game_state->read_input_as_server();
 
     // Step the game state using all inputs
-    current_game_state->step(&this_frames_inputs, 0, time_step);
+    current_game_state->step(0, time_step);
 
     // Broadcast the players and game state
     {
         Serialization::Stream *game_stream = Serialization::make_stream();
         for(ProgramState::Server::ClientConnection &client : Game::program_state->server.client_connections)
         {
-            current_game_state->serialize_into(game_stream, client.uid);
+            current_game_state->serialize(game_stream, client.uid, true);
             client.connection->send_stream(game_stream);
             game_stream->clear();
         }

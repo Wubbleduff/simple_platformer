@@ -7,10 +7,10 @@
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_uv;
 
-uniform mat4 world;
 uniform mat4 mvp;
 
 out vec2 uvs;
+out vec2 world_pos;
 
 void main()
 {
@@ -30,6 +30,7 @@ uniform sampler2D texture0;
 uniform vec4 blend_color;
 
 in vec2 uvs;
+in vec2 world_pos;
 in vec4 vertex_position;
 
 out vec4 frag_color;

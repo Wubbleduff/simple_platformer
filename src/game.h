@@ -2,6 +2,7 @@
 #pragma once
 
 #include "network.h"
+#include "game_math.h"
 #include <vector>
 
 
@@ -12,20 +13,21 @@ struct GameInput
     UID uid;
     enum class Action
     {
-        MOVE_RIGHT,
-        MOVE_LEFT,
         JUMP,
+        SHOOT,
 
         NUM_ACTIONS
     };
 
     bool current_actions[(int)Action::NUM_ACTIONS] = {};
+    float current_horizontal_movement; // Value between -1 and 1
+    GameMath::v2 current_aiming_direction;
 
     bool action(Action action);
+
     void read_from_local();
-    void read_from_connection(Network::Connection **connection);
-    void serialize_into(Serialization::Stream *stream);
-    void deserialize_from(Serialization::Stream *stream);
+    bool read_from_connection(Network::Connection **connection);
+    void serialize(Serialization::Stream *stream, bool serialize);
 };
 typedef std::vector<GameInput> GameInputList;
 

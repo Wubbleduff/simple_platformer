@@ -182,18 +182,10 @@ void Level::Avatar::step(GameInput *input, Level *level, float time_step)
     float horizontal_acceleration = 0.0f;
     float vertical_acceleration = 0.0f;
 
-    bool moving_right = input->action(GameInput::Action::MOVE_RIGHT);
-    bool moving_left = input->action(GameInput::Action::MOVE_LEFT);
     bool jump = input->action(GameInput::Action::JUMP);
+    bool shoot = input->action(GameInput::Action::SHOOT);
 
-    if(moving_right)
-    {
-        horizontal_acceleration += run_strength;
-    }
-    if(moving_left)
-    {
-        horizontal_acceleration -= run_strength;
-    }
+    horizontal_acceleration += input->current_horizontal_movement * run_strength;
 
     if(grounded)
     {
@@ -209,13 +201,17 @@ void Level::Avatar::step(GameInput *input, Level *level, float time_step)
     {
         //vertical_acceleration -= gravity * mass;
     }
-    vertical_acceleration -= gravity * mass;
 
+    if(shoot)
+    {
+        Log::log_info("Bang!");
+    }
+
+    vertical_acceleration -= gravity * mass;
     horizontal_acceleration -= horizontal_velocity * friction_strength;
 
     horizontal_velocity += horizontal_acceleration * time_step;
     vertical_velocity += vertical_acceleration * time_step;
-
     position.x += horizontal_velocity * time_step;
     position.y += vertical_velocity * time_step;
 
@@ -529,6 +525,19 @@ void Level::change_mode(Mode new_mode)
 
 void Level::cleanup()
 {
+}
+
+v2 Level::get_avatar_position(GameInput::UID id)
+{
+    auto it = avatars.find(id);
+    if(it == avatars.end())
+    {
+        return v2();
+    }
+    else
+    {
+        return it->second->position;
+    }
 }
 
 #if DEBUG

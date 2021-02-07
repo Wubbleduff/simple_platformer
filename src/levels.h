@@ -110,6 +110,8 @@ public:
     void change_mode(Mode new_mode);
     void cleanup();
 
+    GameMath::v2 get_avatar_position(GameInput::UID id);
+
 #if DEBUG
     void draw_debug_ui();
 #endif
