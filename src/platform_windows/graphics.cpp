@@ -21,47 +21,17 @@ using namespace GameMath;
 
 
 
-struct Camera
+struct CameraState
 {
-    v2 position;
-    float width;
+    v2 position = v2();
+    float width = 10.0f;
 };
 
-struct Vertex
-{
-    v2 pos;
-
-    Vertex() {}
-    Vertex(v2 p) : pos(p) { }
-};
-
-struct VertexUv
-{
-    v2 pos;
-    v2 uv;
-
-    VertexUv() {}
-    VertexUv(v2 p, v2 u) : pos(p), uv(u) { }
-};
-
-struct Mesh
+struct ObjectBuffer
 {
     GLuint vao;
     GLuint vbo;
-    GLuint ebo;
-
-    int num_indices;
-
-    GLuint primitive_type;
-};
-
-struct MeshUv
-{
-    GLuint vao;
-    GLuint vbo;
-    GLuint ebo;
-
-    int num_indices;
+    int bytes_capacity;
 };
 
 struct Texture
@@ -73,24 +43,36 @@ struct GraphicsState
 {
     HGLRC gl_context;
 
-    Camera *camera;
     float screen_aspect_ratio;
 
-    Mesh *quad_mesh;
-    Mesh *line_mesh;
-    Mesh *triangles_mesh;
-    Mesh *circle_mesh;
-
-    Shader *quad_shader;
-    Shader *flat_color_shader;
-
     Texture *white_texture;
+
+    Shader *batch_quad_shader;
+    ObjectBuffer *batch_quad_buffer;
+    struct QuadRenderingData
+    {
+        v2 position;
+        v2 half_extents;
+        v4 color;
+        float rotation;
+    };
+
+    void render_quad_batch(std::vector<QuadRenderingData> *packed_data);
+
+    struct LayerGroup
+    {
+        std::vector<GraphicsState::QuadRenderingData> quads_packed_buffer;
+        void pack_quad(QuadRenderingData *quad)
+        {
+            quads_packed_buffer.push_back({quad->position, quad->half_extents, quad->color, quad->rotation});
+        }
+    };
+    std::map<int, LayerGroup *> *objects_to_render;
 };
 GraphicsState *Graphics::instance = nullptr;
+CameraState *Graphics::Camera::instance = nullptr;
 
 static const int TARGET_GL_VERSION[2] = { 4, 4 }; // {major, minor}
-static const int MAX_TRIANGLES = 256;
-static const int CIRCLE_MESH_RESOLUTION = 256;
 
 
 
@@ -170,100 +152,7 @@ static void create_gl_context(GraphicsState *instance)
     if(!instance->gl_context) return; // Bad
 }
 
-static Mesh *make_mesh(int num_vertices, Vertex *vertices, int num_indices, int *indices, GLuint primitive_type = GL_TRIANGLES)
-{
-    Mesh *mesh = new Mesh();
 
-    mesh->num_indices = num_indices;
-    mesh->primitive_type = primitive_type;
-
-    glGenVertexArrays(1, &mesh->vao);
-    glBindVertexArray(mesh->vao);
-    check_gl_errors("making vao");
-
-    glGenBuffers(1, &mesh->vbo);
-    check_gl_errors("making vbo");
-
-    glBindBuffer(GL_ARRAY_BUFFER, mesh->vbo);
-    glBufferData(GL_ARRAY_BUFFER, num_vertices * sizeof(Vertex), vertices, GL_STATIC_DRAW);
-    check_gl_errors("send vbo data");
-
-    float stride = sizeof(Vertex);
-
-    // Position
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void *)0);
-    glEnableVertexAttribArray(0);
-
-    check_gl_errors("vertex attrib pointer");
-
-    glGenBuffers(1, &mesh->ebo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, num_indices * sizeof(*indices), indices, GL_STATIC_DRAW);
-
-    return mesh;
-}
-
-static Mesh *make_uv_mesh(int num_vertices, VertexUv *vertices, int num_indices, int *indices, GLuint primitive_type = GL_TRIANGLES)
-{
-    Mesh *mesh = new Mesh();
-
-    mesh->num_indices = num_indices;
-    mesh->primitive_type = primitive_type;
-
-    glGenVertexArrays(1, &mesh->vao);
-    glBindVertexArray(mesh->vao);
-    check_gl_errors("making vao");
-
-    glGenBuffers(1, &mesh->vbo);
-    check_gl_errors("making vbo");
-
-    glBindBuffer(GL_ARRAY_BUFFER, mesh->vbo);
-    glBufferData(GL_ARRAY_BUFFER, num_vertices * sizeof(VertexUv), vertices, GL_STATIC_DRAW);
-    check_gl_errors("send vbo data");
-
-    float stride = sizeof(VertexUv);
-
-    // Position
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void *)0);
-    glEnableVertexAttribArray(0);
-
-    // UV
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void *)(sizeof(v2)));
-    glEnableVertexAttribArray(1);
-
-    check_gl_errors("vertex attrib pointer");
-
-    glGenBuffers(1, &mesh->ebo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, num_indices * sizeof(*indices), indices, GL_STATIC_DRAW);
-
-    return mesh;
-}
-
-static void set_mesh_vertex_buffer_data(Mesh *mesh, int num_vertices, Vertex *vertices)
-{
-    glBindBuffer(GL_ARRAY_BUFFER, mesh->vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, num_vertices * sizeof(Vertex), vertices);
-    glFinish();
-    check_gl_errors("set mesh vertex buffer data");
-}
-
-static void set_mesh_index_buffer_data(Mesh *mesh, int num_indices, int *indices)
-{
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ebo);
-    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, num_indices * sizeof(int), indices);
-    glFinish();
-    check_gl_errors("set mesh index buffer data");
-}
-
-static void use_mesh(Mesh *mesh)
-{
-    glBindVertexArray(mesh->vao);
-    check_gl_errors("use vao");
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ebo);
-    check_gl_errors("use ebo");
-}
 
 static Texture *make_texture_from_bitmap(int width, int height, char *bitmap)
 {
@@ -296,145 +185,56 @@ static void use_texture(Texture *texture)
     glBindTexture(GL_TEXTURE_2D, texture->handle);
 }
 
-static mat4 ndc_m_world(Camera *camera, float screen_aspect_ratio)
+void GraphicsState::render_quad_batch(std::vector<GraphicsState::QuadRenderingData> *packed_data)
 {
-    mat4 view_m_world = make_translation_matrix(v3(-camera->position, 0.0f));
-    mat4 ndc_m_view =
+    if(packed_data->empty()) return;
+
+    Shader *shader = batch_quad_shader;
+    ObjectBuffer *object_buffer = batch_quad_buffer;
+
+    use_shader(shader);
+    mat4 project_m_world = Graphics::ndc_m_world();
+    set_uniform(shader, "vp", project_m_world);
+
+    glBindVertexArray(object_buffer->vao);
+    check_gl_errors("use vao");
+    glBindBuffer(GL_ARRAY_BUFFER, object_buffer->vbo);
+    int bytes = sizeof((*packed_data)[0]) * packed_data->size();
+    assert(bytes <= (object_buffer->bytes_capacity));
+    glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, packed_data->data());
+    check_gl_errors("send quad data");
+
+    use_texture(white_texture);
+
+    glFinish();
+
+    glDrawArrays(GL_POINTS, 0, packed_data->size());
+}
+
+
+
+
+static GraphicsState::LayerGroup *get_or_add_layer_group(int layer)
+{
+    GraphicsState::LayerGroup *group = (*Graphics::instance->objects_to_render)[layer];
+    if(group == nullptr)
     {
-        2.0f / camera->width, 0.0f, 0.0f, 0.0f,
-        0.0f, (2.0f / camera->width) * screen_aspect_ratio, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f
-    };
-
-    return ndc_m_view * view_m_world;
-}
-
-
-
-void Graphics::draw_quad(v2 position, v2 scale, float rotation, v4 color)
-{
-    Mesh *mesh = instance->quad_mesh;
-    use_mesh(mesh);
-
-    use_shader(instance->quad_shader);
-
-    use_texture(instance->white_texture);
-
-    mat4 world_m_model = make_translation_matrix(v3(position, 0.0f)) * make_z_axis_rotation_matrix(rotation) * make_scale_matrix(v3(scale, 1.0f));
-    mat4 mvp = ndc_m_world(instance->camera, instance->screen_aspect_ratio) * world_m_model;
-    set_uniform(instance->quad_shader, "mvp", mvp);
-    set_uniform(instance->quad_shader, "blend_color", color);
-    
-    glDrawElements(mesh->primitive_type, mesh->num_indices, GL_UNSIGNED_INT, 0);
-
-    check_gl_errors("draw");
-}
-
-void Graphics::draw_circle(v2 position, float radius, v4 color)
-{
-    Mesh *mesh = instance->circle_mesh;
-    use_mesh(mesh);
-
-    use_shader(instance->quad_shader);
-
-    use_texture(instance->white_texture);
-
-    mat4 world_m_model = make_translation_matrix(v3(position, 0.0f)) * make_scale_matrix(v3(radius, radius, 1.0f));
-    mat4 mvp = ndc_m_world(instance->camera, instance->screen_aspect_ratio) * world_m_model;
-    set_uniform(instance->quad_shader, "mvp", mvp);
-    set_uniform(instance->quad_shader, "blend_color", color);
-    
-    glDrawElements(mesh->primitive_type, mesh->num_indices, GL_UNSIGNED_INT, 0);
-
-    check_gl_errors("draw");
-}
-
-void Graphics::draw_line(v2 a, v2 b, v4 color)
-{
-    use_mesh(instance->triangles_mesh);
-
-    Vertex v[] = { Vertex(a), Vertex(b) };
-    int i[] = { 0, 1 };
-    set_mesh_vertex_buffer_data(instance->triangles_mesh, 2, v);
-    set_mesh_index_buffer_data(instance->triangles_mesh, 2, i);
-
-    use_shader(instance->flat_color_shader);
-
-    mat4 mvp = ndc_m_world(instance->camera, instance->screen_aspect_ratio);
-    set_uniform(instance->quad_shader, "mvp", mvp);
-    set_uniform(instance->quad_shader, "blend_color", color);
-
-    // Why is this LINE_STRIP with the triangles mesh?
-    glDrawElements(GL_LINE_STRIP, 2, GL_UNSIGNED_INT, 0);
-
-    check_gl_errors("draw");
-}
-
-void Graphics::draw_triangles(int num_vertices, v2 *vertices, int num_triples, v2 **triples, v4 color)
-{
-    // TODO: Fix this to only be 1 allocation on initialize
-    Vertex *my_vertices = new Vertex[num_vertices]();
-    int num_indices = num_triples * 3;
-    int *indices = new int[num_indices]();
-
-    //assert(num_vertices == num_triples + 2);
-
-    use_mesh(instance->triangles_mesh);
-
-    for(int i = 0; i < num_vertices; i++)
-    {
-        my_vertices[i] = Vertex(vertices[i]);
+        group = new GraphicsState::LayerGroup();
+        (*Graphics::instance->objects_to_render)[layer] = group;
     }
-    set_mesh_vertex_buffer_data(instance->triangles_mesh, num_vertices, my_vertices);
 
-
-    v2 *start = vertices;
-    for(int i = 0; i < num_indices; i += 3)
-    {
-        v2 *a = triples[i + 0];
-        v2 *b = triples[i + 1];
-        v2 *c = triples[i + 2];
-        indices[i + 0] = a - start;
-        indices[i + 1] = b - start;
-        indices[i + 2] = c - start;
-    }
-    set_mesh_index_buffer_data(instance->triangles_mesh, num_indices, indices);
-
-    use_shader(instance->flat_color_shader);
-
-    mat4 mvp = ndc_m_world(instance->camera, instance->screen_aspect_ratio);
-    set_uniform(instance->quad_shader, "mvp", mvp);
-    set_uniform(instance->quad_shader, "blend_color", color);
-
-    glDrawElements(instance->triangles_mesh->primitive_type, num_indices, GL_UNSIGNED_INT, 0);
-
-    check_gl_errors("draw");
-
-    // SEE ABOVE
-    delete[] my_vertices;
-    delete[] indices;
+    return group;
 }
 
-v2 Graphics::ndc_point_to_world(v2 ndc)
+void Graphics::quad(v2 position, v2 scale, float rotation, v4 color, int layer)
 {
-    mat4 m_ndc_m_world = ndc_m_world(instance->camera, instance->screen_aspect_ratio);
-
-    v4 ndc4 = v4(ndc, 0.0f, 1.0f);
-    v4 world4 = inverse(m_ndc_m_world) * ndc4;
-
-    return v2(world4.x, world4.y);
+    GraphicsState::LayerGroup *group = get_or_add_layer_group(layer);
+    GraphicsState::QuadRenderingData data = {position, scale, color, rotation};
+    group->pack_quad(&data);
 }
 
-void Graphics::set_camera_position(v2 position)
-{
-    instance->camera->position = position;
-}
 
-void Graphics::set_camera_width(float width)
-{
-    instance->camera->width = width;
-}
+
 
 
 
@@ -444,55 +244,51 @@ void Graphics::init()
 
     create_gl_context(instance);
 
+    Graphics::ImGuiImplementation::init();
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    instance->camera = new Camera();
-    instance->camera->position = v2();
-    instance->camera->width = 10.0f;
+    Camera::instance = new CameraState();
     instance->screen_aspect_ratio = Platform::Window::aspect_ratio();
-    
+
+    instance->objects_to_render = new std::map<int, GraphicsState::LayerGroup *>();
+
+    instance->batch_quad_shader = make_shader("assets/shaders/batch_quad.shader");
+
+    // Make quad object buffer
     {
-        // Make quad mesh
-        VertexUv v[] =
-        {
-            { {-0.5f, -0.5f}, {0.0f, 0.0f} }, // BL
-            { { 0.5f, -0.5f}, {1.0f, 0.0f} }, // BR
-            { { 0.5f,  0.5f}, {1.0f, 1.0f} }, // TR
-            { {-0.5f,  0.5f}, {0.0f, 1.0f} }, // TL
-        };
-        int i[] =
-        {
-            0, 1, 2,
-            0, 2, 3
-        };
-        instance->quad_mesh = make_uv_mesh(_countof(v), v, _countof(i), i);
+        instance->batch_quad_buffer = new ObjectBuffer();
+        glGenVertexArrays(1, &instance->batch_quad_buffer->vao);
+        glBindVertexArray(instance->batch_quad_buffer->vao);
+        check_gl_errors("making vao");
 
-        instance->line_mesh = make_mesh(2, nullptr, 2, nullptr);
-        instance->triangles_mesh = make_mesh(MAX_TRIANGLES, nullptr, MAX_TRIANGLES * 3, nullptr);
+        glGenBuffers(1, &instance->batch_quad_buffer->vbo);
+        check_gl_errors("making vbo");
 
-        Vertex *circle_vs = new Vertex[CIRCLE_MESH_RESOLUTION]();
-        int *circle_is = new int[CIRCLE_MESH_RESOLUTION]();
-        for(int i = 0; i < CIRCLE_MESH_RESOLUTION; i++)
-        {
-            float theta = remap(i, 0.0f, CIRCLE_MESH_RESOLUTION - 1.0f, 0.0f, 2.0f * PI);
-            circle_vs[i] = { v2(GameMath::cos(theta), GameMath::sin(theta)) };
-        }
-        for(int i = 0; i < CIRCLE_MESH_RESOLUTION; i++) circle_is[i] = i;
-        instance->circle_mesh = make_mesh(CIRCLE_MESH_RESOLUTION, circle_vs, CIRCLE_MESH_RESOLUTION, circle_is, GL_LINE_STRIP);
-        delete[] circle_vs;
-        delete[] circle_is;
+        static const int MAX_QUADS = 1024 * 10;
+        glBindBuffer(GL_ARRAY_BUFFER, instance->batch_quad_buffer->vbo);
+        glBufferData(GL_ARRAY_BUFFER, MAX_QUADS * sizeof(GraphicsState::QuadRenderingData), nullptr, GL_DYNAMIC_DRAW);
+        check_gl_errors("send vbo data");
+        instance->batch_quad_buffer->bytes_capacity = MAX_QUADS * sizeof(GraphicsState::QuadRenderingData);
 
-        // Make shader
-        instance->quad_shader = make_shader("assets/shaders/quad.shader");
-        instance->flat_color_shader = make_shader("assets/shaders/flat_color.shader");
-
-        // Make texture
+        float stride = sizeof(GraphicsState::QuadRenderingData);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void *)0); // Position
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void *)(1 * sizeof(v2))); // Scale
+        glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, stride, (void *)(2 * sizeof(v2))); // Color
+        glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, (void *)(2 * sizeof(v2) + sizeof(v4))); // Rotation
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glEnableVertexAttribArray(2);
+        glEnableVertexAttribArray(3);
+        check_gl_errors("vertex attrib pointer");
+    }
+    
+    // Make texture
+    {
         char bitmap[] = { (char)255, (char)255, (char)255, (char)255 };
         instance->white_texture = make_texture_from_bitmap(1, 1, bitmap);
     }
-
-    Graphics::ImGuiImplementation::init();
 }
 
 void Graphics::clear_frame(v4 color)
@@ -501,10 +297,70 @@ void Graphics::clear_frame(v4 color)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
+void Graphics::render()
+{
+    std::map<int, GraphicsState::LayerGroup *> *objects_to_render = instance->objects_to_render;
+
+    for(std::pair<int, GraphicsState::LayerGroup *> pair : *objects_to_render)
+    {
+        GraphicsState::LayerGroup *group = pair.second;
+
+        // Render all quads
+        instance->render_quad_batch(&group->quads_packed_buffer);
+        group->quads_packed_buffer.clear();
+    }
+
+}
+
 void Graphics::swap_frames()
 {
+    glFlush();
+    //glFinish();
+
     HDC dc = Windows::device_context();
     SwapBuffers(dc);
+}
+
+
+
+GameMath::mat4 Graphics::view_m_world()
+{
+    return make_translation_matrix(v3(-Camera::instance->position, 0.0f));
+}
+
+GameMath::mat4 Graphics::world_m_view()
+{
+    return inverse(view_m_world());
+}
+
+GameMath::mat4 Graphics::ndc_m_world()
+{
+    mat4 ndc_m_view =
+    {
+        2.0f / Camera::width(), 0.0f, 0.0f, 0.0f,
+        0.0f, (2.0f / Camera::width()) * instance->screen_aspect_ratio, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    };
+
+    return ndc_m_view * view_m_world();
+}
+
+GameMath::mat4 Graphics::world_m_ndc()
+{
+    return inverse(ndc_m_world());
+}
+
+
+
+GameMath::v2 &Graphics::Camera::position()
+{
+    return instance->position;
+}
+
+float &Graphics::Camera::width()
+{
+    return instance->width;
 }
 
 

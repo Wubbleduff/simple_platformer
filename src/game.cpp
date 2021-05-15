@@ -27,8 +27,19 @@ using namespace GameMath;
 
 struct MenuState
 {
+    enum Screen
+    {
+        MAIN_MENU,
+        LEVEL_SELECT
+    };
+
+    Screen screen = MAIN_MENU;
+
+    void change_screen(Screen screen);
     void step(float time_step);
     void draw();
+    void draw_main_menu();
+    void draw_level_select();
     void cleanup();
 };
 
@@ -49,6 +60,7 @@ struct GameState
     std::vector<GameInput> inputs_this_frame;
 
     MenuState *menu_state; // For main menu, win/lose screen, etc. (What about pause menu? idk...)
+    int level_to_start = 0;
     Level *playing_level;  // For when the player is playing the game
 
     void read_input_as_offline();
@@ -60,6 +72,7 @@ struct GameState
     void check_for_mode_switch();
     void init_for_main_menu(bool initting);
     void init_for_playing_level(bool initting);
+    void start_level(int level);
     void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
 
 #if DEBUG
@@ -72,9 +85,7 @@ struct Timeline
     static const int MAX_STEPS_PER_UPDATE;
     float seconds_since_last_step;
     float last_update_time;
-
     float step_frequency;
-
     int next_step_time_index;
     std::array<float, 120> step_times;
 
@@ -84,11 +95,14 @@ struct Timeline
 };
 const int Timeline::MAX_STEPS_PER_UPDATE = 10;
 
-struct ProgramState
+// Engine processes game states
+struct Engine
 {
-    static const float TARGET_STEP_TIME;
-    bool running;
+    static Engine *instance;
 
+    static const float TARGET_STEP_TIME;
+
+    bool running;
     Timeline *timeline = nullptr;
 
     enum class NetworkMode
@@ -106,7 +120,6 @@ struct ProgramState
         Network::Connection *server_connection;
         float connecting_timeout_timer = 0.0f;
 
-        void connect_to_server(const char *ip_address, int port);
         void disconnect_from_server();
         bool is_connected();
         void update_connection(float time_step);
@@ -132,18 +145,29 @@ struct ProgramState
 
 
 
-    void init();
-    void switch_network_mode(NetworkMode mode);
-    void step_as_offline(float time_step);
-    void step_as_client(float time_step);
-    void step_as_server(float time_step);
-    void do_one_step(float time_step);
-    void shutdown();
+    static void start();
+    static void stop();
+    static void init();
+    
+    // Switches to client mode and connects to a server
+    static void connect(const char *ip_address, int port);
+
+    // Switch to a network mode (local, client, server)
+    static void switch_network_mode(NetworkMode mode);
+
+    // Engine tick
+    static void do_one_step(float time_step);
+    static void step_as_offline(GameState *game_state, float time_step);
+    static void step_as_client(GameState *game_state, float time_step);
+    static void step_as_server(GameState *game_state, float time_step);
+
+    static void shutdown();
 };
-ProgramState *Game::program_state = nullptr;
-const float ProgramState::TARGET_STEP_TIME = 0.01666; // In seconds
+Engine *Engine::instance = nullptr;
+
+const float Engine::TARGET_STEP_TIME = 0.01666f;
 static const int SERVER_PORT = 4242;
-const float ProgramState::Client::TIMEOUT = 2.0f;
+const float Engine::Client::TIMEOUT = 2.0f;
 
 
 
@@ -179,6 +203,7 @@ void GameInput::serialize(Serialization::Stream *stream, bool serialize)
     
 }
 
+// TODO: Should I pass current_game_state here?
 void GameInput::read_from_local()
 {
     current_actions[(int)Action::JUMP] = Platform::Input::key_down(' ');
@@ -189,7 +214,8 @@ void GameInput::read_from_local()
     h += Platform::Input::key('D') ? 1.0f : 0.0f;
     current_horizontal_movement = h;
 
-    v2 avatar_pos = Game::program_state->current_game_state->playing_level->get_avatar_position(uid);
+    // TODO: This is spooky
+    v2 avatar_pos = Engine::instance->current_game_state->playing_level->get_avatar_position(uid);
     current_aiming_direction = Platform::Input::mouse_world_position() - avatar_pos;
 }
 
@@ -331,7 +357,7 @@ void GameState::read_input_as_server()
             inputs_this_frame.push_back(local_input);
 
             // Read remote player's input
-            for(ProgramState::Server::ClientConnection &client : Game::program_state->server.client_connections)
+            for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
             {
                 GameInput remote_input;
                 remote_input.uid = client.uid;
@@ -342,7 +368,7 @@ void GameState::read_input_as_server()
                 }
             }
             // Clean out disconnected connections
-            Game::program_state->server.remove_disconnected_clients();
+            Engine::instance->server.remove_disconnected_clients();
 
         }
         break;
@@ -382,7 +408,7 @@ void GameState::draw()
         playing_level->draw();
         break;
     case Mode::EDITING:
-        playing_level->edit_draw();
+        //playing_level->edit_draw();
         break;
     }
 }
@@ -418,7 +444,6 @@ void GameState::serialize(Serialization::Stream *stream, GameInput::UID other_ui
         }
         playing_level->deserialize(stream);
     }
-
 }
 
 
@@ -451,13 +476,19 @@ void GameState::init_for_playing_level(bool initting)
         my_uid = 0;
         frame_number = 0;
         inputs_this_frame.clear();
-        playing_level = create_level(0);
+        playing_level = create_level(level_to_start);
     }
     else
     {
         destroy_level(playing_level);
         playing_level = nullptr;
     }
+}
+
+void GameState::start_level(int level)
+{
+    level_to_start = level;
+    switch_game_mode(Mode::PLAYING_LEVEL);
 }
 
 #if DEBUG
@@ -477,11 +508,31 @@ void GameState::draw_debug_ui()
 }
 #endif
 
+void MenuState::change_screen(MenuState::Screen in_screen)
+{
+    screen = in_screen;
+}
+
 void MenuState::step(float time_step)
 {
 }
 
+// TODO: Should I pass current_game_state here?
 void MenuState::draw()
+{
+    switch(screen)
+    {
+        case MAIN_MENU:
+            draw_main_menu();
+            break;
+
+        case LEVEL_SELECT:
+            draw_level_select();
+            break;
+    }
+}
+
+void MenuState::draw_main_menu()
 {
     ImGuiWindowFlags window_flags = 0;
     window_flags |= ImGuiWindowFlags_NoTitleBar;
@@ -500,30 +551,27 @@ void MenuState::draw()
     ImGui::Begin("Main Menu", p_open, window_flags);
     float button_scalar = Platform::Window::screen_width() * 0.2f;
     ImVec2 button_size = ImVec2(button_scalar, button_scalar * 0.25f);
-    if(ImGui::Button("Start game", button_size))
+    if(ImGui::Button("Start", button_size))
     {
-        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
+        change_screen(LEVEL_SELECT);
     }
     static char address_string[16] = "127.0.0.1";
-    if(ImGui::Button("Start game as client", button_size))
+    if(ImGui::Button("Join player", button_size))
     {
-        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
-        Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
-        Game::program_state->client.connect_to_server(address_string, SERVER_PORT);
+        Engine::connect(address_string, SERVER_PORT);
     }
     ImGui::SameLine();
     ImGui::InputText("Address", address_string, sizeof(address_string), 0);
 
-    if(ImGui::Button("Start game as server", button_size))
+    if(ImGui::Button("Open lobby", button_size))
     {
-        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
-        Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+        Engine::switch_network_mode(Engine::NetworkMode::SERVER);
     }
 
     for(int i = 0; i < 12; i++) ImGui::Spacing();
     if(ImGui::Button("Quit game", button_size))
     {
-        Game::stop();
+        Engine::stop();
     }
 
 
@@ -531,9 +579,48 @@ void MenuState::draw()
     for(int i = 0; i < 12; i++) ImGui::Spacing();
     if(ImGui::Button("Edit Game", button_size))
     {
-        Game::program_state->current_game_state->switch_game_mode(GameState::Mode::EDITING);
+        // TODO: Here
+        // Do something like Engine::start_editing()
+        Engine::instance->current_game_state->switch_game_mode(GameState::Mode::EDITING);
     }
 #endif
+
+    ImGui::End();
+}
+
+void MenuState::draw_level_select()
+{
+    ImGuiWindowFlags window_flags = 0;
+    window_flags |= ImGuiWindowFlags_NoTitleBar;
+    window_flags |= ImGuiWindowFlags_NoScrollbar;
+    //window_flags |= ImGuiWindowFlags_MenuBar;
+    window_flags |= ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoResize;
+    window_flags |= ImGuiWindowFlags_NoCollapse;
+    window_flags |= ImGuiWindowFlags_NoNav;
+    //window_flags |= ImGuiWindowFlags_NoBackground;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus;
+    bool *p_open = NULL;
+
+    ImGui::SetNextWindowPos( ImVec2(0, 0) );
+    ImGui::SetNextWindowSize( ImVec2(Platform::Window::screen_width(), Platform::Window::screen_height()) );
+    ImGui::Begin("Level select", p_open, window_flags);
+    float button_scalar = Platform::Window::screen_width() * 0.2f;
+    ImVec2 button_size = ImVec2(button_scalar, button_scalar * 0.25f);
+    if(ImGui::Button("Level 1", button_size))
+    {
+        Engine::instance->current_game_state->start_level(0);
+    }
+    if(ImGui::Button("Level 2", button_size))
+    {
+        Engine::instance->current_game_state->start_level(1);
+    }
+
+    for(int i = 0; i < 12; i++) ImGui::Spacing();
+    if(ImGui::Button("Main menu", button_size))
+    {
+        change_screen(MAIN_MENU);
+    }
 
     ImGui::End();
 }
@@ -581,7 +668,7 @@ void Timeline::update()
             for(int i = 0; i < num_steps_to_do; i++)
             {
                 float step_start = Platform::time_since_start();
-                Game::program_state->do_one_step(step_frequency);
+                Engine::do_one_step(step_frequency);
                 float step_end = Platform::time_since_start();
 
                 float step_diff = step_end - step_start;
@@ -602,7 +689,7 @@ void Timeline::update()
             for(int i = 0; i < MAX_STEPS_PER_UPDATE; i++)
             {
                 float step_start = Platform::time_since_start();
-                Game::program_state->do_one_step(step_frequency);
+                Engine::do_one_step(step_frequency);
                 float step_end = Platform::time_since_start();
 
                 float step_diff = step_end - step_start;
@@ -631,25 +718,21 @@ void Timeline::update()
 
 
 
-void ProgramState::Client::connect_to_server(const char *ip_address, int port)
-{
-    server_connection = Network::connect(ip_address, port);
-}
-
-void ProgramState::Client::disconnect_from_server()
+void Engine::Client::disconnect_from_server()
 {
     Network::disconnect(&server_connection);
+
     // Reset the level's state
-    Game::program_state->current_game_state->switch_game_mode(GameState::Mode::PLAYING_LEVEL);
+    instance->current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
 }
 
-bool ProgramState::Client::is_connected()
+bool Engine::Client::is_connected()
 {
     if(server_connection == nullptr) return false;
     return server_connection->is_connected();
 }
 
-void ProgramState::Client::update_connection(float time_step)
+void Engine::Client::update_connection(float time_step)
 {
     if(server_connection == nullptr) return;
     if(server_connection->is_connected()) return;
@@ -670,13 +753,13 @@ void ProgramState::Client::update_connection(float time_step)
 
 
 
-bool ProgramState::Server::startup(int port)
+bool Engine::Server::startup(int port)
 {
     bool success = Network::listen_for_client_connections(port);
     return success;
 }
 
-void ProgramState::Server::shutdown()
+void Engine::Server::shutdown()
 {
     for(ClientConnection &client : client_connections)
     {
@@ -687,13 +770,13 @@ void ProgramState::Server::shutdown()
     Log::log_info("Server shutdown");
 }
 
-void ProgramState::Server::add_client_connection(Network::Connection *connection)
+void Engine::Server::add_client_connection(Network::Connection *connection)
 {
     client_connections.push_back( {next_input_uid, connection} );
     next_input_uid++;
 }
 
-void ProgramState::Server::remove_disconnected_clients()
+void Engine::Server::remove_disconnected_clients()
 {
     auto it = std::remove_if(client_connections.begin(), client_connections.end(),
             [](const ClientConnection &client) { return client.connection == nullptr; }
@@ -704,21 +787,23 @@ void ProgramState::Server::remove_disconnected_clients()
 
 
 
-void ProgramState::step_as_offline(float time_step)
+void Engine::step_as_offline(GameState *game_state, float time_step)
 {
-    current_game_state->check_for_mode_switch();
+    game_state->check_for_mode_switch();
 
     Platform::Input::read_input();
-    current_game_state->read_input_as_offline();
+    game_state->read_input_as_offline();
 
-    current_game_state->step(0, time_step);
+    game_state->step(0, time_step);
 
     // Do drawing
     {
 
         Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
         Graphics::ImGuiImplementation::new_frame();
-        current_game_state->draw();
+        game_state->draw();
+
+        Graphics::render();
 
 #if DEBUG
         {
@@ -729,8 +814,8 @@ void ProgramState::step_as_offline(float time_step)
                 if(ImGui::BeginTabItem("Networking"))
                 {
                     ImGui::Text("OFFLINE");
-                    if(ImGui::Button("Switch to client")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
-                    if(ImGui::Button("Switch to server")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+                    if(ImGui::Button("Switch to client")) Engine::switch_network_mode(Engine::NetworkMode::CLIENT);
+                    if(ImGui::Button("Switch to server")) Engine::switch_network_mode(Engine::NetworkMode::SERVER);
                     ImGui::EndTabItem();
                 }
                 if(ImGui::BeginTabItem("Console"))
@@ -740,13 +825,13 @@ void ProgramState::step_as_offline(float time_step)
                 }
                 if(ImGui::BeginTabItem("Frame times"))
                 {
-                    float avg = GameMath::average(Game::program_state->timeline->step_times.data(), Game::program_state->timeline->step_times.size());
+                    float avg = GameMath::average(Engine::instance->timeline->step_times.data(), Engine::instance->timeline->step_times.size());
                     ImGui::Text("Average step time: %f", avg);
-                    ImGui::PlotHistogram("Step Times", Game::program_state->timeline->step_times.data(), Game::program_state->timeline->step_times.size(), 0, 0, 0.0f, 0.032f, ImVec2(512.0f, 256.0f));
+                    ImGui::PlotHistogram("Step Times", Engine::instance->timeline->step_times.data(), Engine::instance->timeline->step_times.size(), 0, 0, 0.0f, 0.016f, ImVec2(512.0f, 256.0f));
                     ImGui::EndTabItem();
                 }
 
-                current_game_state->draw_debug_ui();
+                game_state->draw_debug_ui();
 
                 ImGui::EndTabBar();
             }
@@ -761,11 +846,12 @@ void ProgramState::step_as_offline(float time_step)
     }
 }
 
-void ProgramState::step_as_client(float time_step)
+// TODO: Pass the current game state and the client state here
+void Engine::step_as_client(GameState *game_state, float time_step)
 { 
-    current_game_state->check_for_mode_switch();
+    game_state->check_for_mode_switch();
 
-    Game::program_state->client.update_connection(time_step);
+    Engine::instance->client.update_connection(time_step);
 
     // TODO:
     // Once doing client side prediction, read input using the game state's read_input
@@ -776,18 +862,18 @@ void ProgramState::step_as_client(float time_step)
 
 
     // Send the local player's input to the server
-    if(Game::program_state->client.is_connected())
+    if(Engine::instance->client.is_connected())
     {
         Serialization::Stream *input_stream = Serialization::make_stream();
 
-        current_game_state->read_input_as_client();
+        game_state->read_input_as_client();
 
-        for(GameInput &input : current_game_state->inputs_this_frame)
+        for(GameInput &input : game_state->inputs_this_frame)
         {
             input.serialize(input_stream, true);
         }
 
-        Game::program_state->client.server_connection->send_stream(input_stream);
+        Engine::instance->client.server_connection->send_stream(input_stream);
         Serialization::free_stream(input_stream);
     }
 
@@ -802,14 +888,14 @@ void ProgramState::step_as_client(float time_step)
     
 
     // Read server's game state
-    if(Game::program_state->client.is_connected())
+    if(Engine::instance->client.is_connected())
     {
         Serialization::Stream *game_stream = Serialization::make_stream();
-        Network::ReadResult result = Game::program_state->client.server_connection->read_into_stream(game_stream);
+        Network::ReadResult result = Engine::instance->client.server_connection->read_into_stream(game_stream);
 
         if(result == Network::ReadResult::CLOSED)
         {
-            Game::program_state->client.disconnect_from_server();
+            Engine::instance->client.disconnect_from_server();
         }
         else if(result == Network::ReadResult::READY)
         {
@@ -826,7 +912,7 @@ void ProgramState::step_as_client(float time_step)
 
             // For now, we'll just be a dumb-client
             // Pass -1 for now  because it doesn't make sense in this context (2/6/2021)
-            current_game_state->serialize(game_stream, -1, false);
+            game_state->serialize(game_stream, -1, false);
         }
 
         Serialization::free_stream(game_stream);
@@ -834,7 +920,7 @@ void ProgramState::step_as_client(float time_step)
     else
     {
         unsigned int focus = 0;
-        current_game_state->step(focus, time_step);
+        game_state->step(focus, time_step);
     }
 
     // Draw
@@ -855,17 +941,17 @@ void ProgramState::step_as_client(float time_step)
                 {
                     ImGui::Text("CLIENT");
 
-                    if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
-                    if(ImGui::Button("Switch to server"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::SERVER);
+                    if(ImGui::Button("Switch to offline")) Engine::switch_network_mode(Engine::NetworkMode::OFFLINE);
+                    if(ImGui::Button("Switch to server"))  Engine::switch_network_mode(Engine::NetworkMode::SERVER);
 
                     
                     static char address_string[16] = "127.0.0.1";
                     ImGui::InputText("Address", address_string, sizeof(address_string), 0);
-                    if(Game::program_state->client.is_connected())
+                    if(Engine::instance->client.is_connected())
                     {
                         if(ImGui::Button("Disconnect from server"))
                         {
-                            Game::program_state->client.disconnect_from_server();
+                            Engine::instance->client.disconnect_from_server();
                             game_state_still_valid = false;
                         }
                     }
@@ -873,7 +959,7 @@ void ProgramState::step_as_client(float time_step)
                     {
                         if(ImGui::Button("Connect to server"))
                         {
-                            Game::program_state->client.connect_to_server(address_string, SERVER_PORT);
+                            Engine::connect(address_string, SERVER_PORT);
                         }
                     }
 
@@ -889,7 +975,7 @@ void ProgramState::step_as_client(float time_step)
                     ImGui::EndTabItem(); // Frame times
                 }
 
-                current_game_state->draw_debug_ui();
+                game_state->draw_debug_ui();
 
                 ImGui::EndTabBar(); // ##tabs
             }
@@ -901,40 +987,42 @@ void ProgramState::step_as_client(float time_step)
 
         if(game_state_still_valid)
         {
-            current_game_state->draw();
+            game_state->draw();
         }
 
+        Graphics::render();
 
         Graphics::ImGuiImplementation::end_frame();
         Graphics::swap_frames();
     }
 }
 
-void ProgramState::step_as_server(float time_step)
+// TODO: Pass the current game state and server state here
+void Engine::step_as_server(GameState *game_state, float time_step)
 {
-    current_game_state->check_for_mode_switch();
+    game_state->check_for_mode_switch();
 
     // Accept new connections to the server
     std::vector<Network::Connection *> new_connections = Network::accept_client_connections();
     for(int i = 0; i < new_connections.size(); i++)
     {
         Network::Connection *new_connection = new_connections[i];
-        Game::program_state->server.add_client_connection(new_connection);
+        Engine::instance->server.add_client_connection(new_connection);
     }
 
     // Prepare for reading input
     Platform::Input::read_input();
-    current_game_state->read_input_as_server();
+    game_state->read_input_as_server();
 
     // Step the game state using all inputs
-    current_game_state->step(0, time_step);
+    game_state->step(0, time_step);
 
     // Broadcast the players and game state
     {
         Serialization::Stream *game_stream = Serialization::make_stream();
-        for(ProgramState::Server::ClientConnection &client : Game::program_state->server.client_connections)
+        for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
         {
-            current_game_state->serialize(game_stream, client.uid, true);
+            game_state->serialize(game_stream, client.uid, true);
             client.connection->send_stream(game_stream);
             game_stream->clear();
         }
@@ -947,7 +1035,9 @@ void ProgramState::step_as_server(float time_step)
     {
         Graphics::clear_frame(v4(0.0f, 0.5f, 0.75f, 1.0f) * 0.1f);
         Graphics::ImGuiImplementation::new_frame();
-        current_game_state->draw();
+        game_state->draw();
+
+        Graphics::render();
 
 #if DEBUG
 
@@ -960,8 +1050,8 @@ void ProgramState::step_as_server(float time_step)
             {
                 if(ImGui::BeginTabItem("Networking"))
                 {
-                    if(ImGui::Button("Switch to offline")) Game::program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
-                    if(ImGui::Button("Switch to client"))  Game::program_state->switch_network_mode(ProgramState::NetworkMode::CLIENT);
+                    if(ImGui::Button("Switch to offline")) Engine::switch_network_mode(Engine::NetworkMode::OFFLINE);
+                    if(ImGui::Button("Switch to client"))  Engine::switch_network_mode(Engine::NetworkMode::CLIENT);
                     ImGui::EndTabItem();
                 }
                 if(ImGui::BeginTabItem("Console"))
@@ -974,7 +1064,7 @@ void ProgramState::step_as_server(float time_step)
                     ImGui::EndTabItem();
                 }
 
-                current_game_state->draw_debug_ui();
+                game_state->draw_debug_ui();
 
                 ImGui::EndTabBar();
             }
@@ -988,70 +1078,94 @@ void ProgramState::step_as_server(float time_step)
     }
 }
 
-void ProgramState::do_one_step(float time_step)
+void Engine::do_one_step(float time_step)
 {
-    switch(network_mode)
+    GameState *current_game_state = instance->current_game_state;
+
+    switch(instance->network_mode)
     {
         case NetworkMode::OFFLINE:
         {
-            step_as_offline(time_step);
+            step_as_offline(current_game_state, time_step);
             break;
         }
         case NetworkMode::CLIENT:
         {
-            step_as_client(time_step);
+            step_as_client(current_game_state, time_step);
             break;
         }
         case NetworkMode::SERVER:
         {
-            step_as_server(time_step);
+            step_as_server(current_game_state, time_step);
             break;
         }
     }
 }
 
-void ProgramState::switch_network_mode(NetworkMode mode)
+void Engine::switch_network_mode(NetworkMode mode)
 {
     if(mode == NetworkMode::OFFLINE)
     {
-        if(network_mode == NetworkMode::CLIENT)
+        if(instance->network_mode == NetworkMode::CLIENT)
         {
-            client.disconnect_from_server();
+            instance->client.disconnect_from_server();
         }
-        if(network_mode == NetworkMode::SERVER)
+        if(instance->network_mode == NetworkMode::SERVER)
         {
-            server.shutdown();
+            instance->server.shutdown();
         }
-        network_mode = NetworkMode::OFFLINE;
+        instance->network_mode = NetworkMode::OFFLINE;
     }
 
     if(mode == NetworkMode::CLIENT)
     {
-        if(network_mode == NetworkMode::SERVER)
+        if(instance->network_mode == NetworkMode::SERVER)
         {
-            server.shutdown();
+            instance->server.shutdown();
         }
-        network_mode = NetworkMode::CLIENT;
-        client.server_connection = nullptr;
+        instance->network_mode = NetworkMode::CLIENT;
+        instance->client.server_connection = nullptr;
     }
 
     if(mode == NetworkMode::SERVER)
     {
-        if(network_mode == NetworkMode::CLIENT)
+        if(instance->network_mode == NetworkMode::CLIENT)
         {
-            client.disconnect_from_server();
+            instance->client.disconnect_from_server();
         }
-        bool success = server.startup(SERVER_PORT);
+        bool success = instance->server.startup(SERVER_PORT);
         if(success)
         {
-            network_mode = NetworkMode::SERVER;
+            instance->network_mode = NetworkMode::SERVER;
         }
     }
 }
 
-void ProgramState::shutdown()
+void Engine::connect(const char *ip_address, int port)
 {
-    switch(network_mode)
+    Engine::switch_network_mode(Engine::NetworkMode::CLIENT);
+    instance->client.server_connection = Network::connect(ip_address, port);
+}
+
+void Engine::init()
+{
+    instance = new Engine();
+
+    instance->running = true;
+    instance->timeline = new Timeline();
+
+    instance->network_mode = Engine::NetworkMode::OFFLINE;
+    instance->current_game_state = new GameState();
+    instance->current_game_state->current_mode = GameState::Mode::INVALID;
+    instance->current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
+
+    instance->timeline->reset();
+    instance->timeline->step_with_frequency(Engine::TARGET_STEP_TIME);
+}
+
+void Engine::shutdown()
+{
+    switch(instance->network_mode)
     {
         case NetworkMode::OFFLINE:
         {
@@ -1060,13 +1174,13 @@ void ProgramState::shutdown()
 
         case NetworkMode::CLIENT:
         {
-            client.disconnect_from_server();
+            instance->client.disconnect_from_server();
             break;
         }
 
         case NetworkMode::SERVER:
         {
-            server.shutdown();
+            instance->server.shutdown();
             break;
         }
     }
@@ -1074,23 +1188,9 @@ void ProgramState::shutdown()
     Graphics::ImGuiImplementation::shutdown();
 }
 
-void ProgramState::init()
-{
-    running = true;
-
-    timeline = new Timeline();
-
-    network_mode = ProgramState::NetworkMode::OFFLINE;
-
-    current_game_state = new GameState();
-    current_game_state->current_mode = GameState::Mode::INVALID;
-    current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
-
-}
 
 
-
-void Game::start()
+void Engine::start()
 {
     Platform::init();
     Log::init();
@@ -1101,38 +1201,45 @@ void Game::start()
     //seed_random(0);
     seed_random((int)(Platform::time_since_start() * 10000.0f));
 
-    program_state = new ProgramState();
-    program_state->init();
+    init();
 
-    program_state->timeline->reset();
-    program_state->timeline->step_with_frequency(ProgramState::TARGET_STEP_TIME);
-    while(program_state->running)
+    while(instance->running)
     {
         // Check on OS events as frequently as possible
         Platform::handle_os_events();
-        if(program_state->running == false) break;
+        if(instance->running == false) break;
 
-        program_state->timeline->update();
+        instance->timeline->update();
     }
 
-    // -----------------
-    program_state->shutdown();
+    shutdown();
 }
 
-void Game::stop()
+void Engine::stop()
 {
-    program_state->running = false;
+    instance->running = false;
 }
 
+
+
+
+
+
+
+
+// TODO: Remove
 GameInput::UID Game::get_my_uid()
 {
-    return program_state->current_game_state->my_uid;
+    return Engine::instance->current_game_state->my_uid;
 }
+void Game::start() { Engine::start(); }
+void Game::stop() { Engine::stop(); }
 
+// TODO: Make this like "CurrentGameState::exit_to_main_menu()" or something like that
 void Game::exit_to_main_menu()
 {
-    program_state->current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
-    program_state->switch_network_mode(ProgramState::NetworkMode::OFFLINE);
+    Engine::instance->current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
+    Engine::switch_network_mode(Engine::NetworkMode::OFFLINE);
 }
 
 

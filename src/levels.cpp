@@ -20,12 +20,13 @@ using namespace GameMath;
 
 
 // TODO: Global until I find a better place for this
-typedef std::map<int, char *> LevelFilessMap;
-static LevelFilessMap level_files =
+#define LEVELS_DIR "assets/data/levels/"
+typedef std::map<int, char *> LevelFilesMap;
+static LevelFilesMap level_files =
 {
-    {0, "assets/data/levels/level_0"},
-    {1, "assets/data/levels/level_1"},
-    {2, "assets/data/levels/level_2"}
+    {0, LEVELS_DIR "level_0"},
+    {1, LEVELS_DIR "level_1"},
+    {2, LEVELS_DIR "level_2"}
 };
 
 
@@ -225,7 +226,7 @@ void Level::Avatar::step(GameInput *input, Level *level, float time_step)
 
 void Level::Avatar::draw()
 {
-    Graphics::draw_quad(position, v2(1.0f, 1.0f) * full_extent, 0.0f, color);
+    Graphics::quad(position, v2(1.0f, 1.0f) * full_extent, 0.0f, color);
 }
 
 void Level::Avatar::check_and_resolve_collisions(Level *level)
@@ -360,7 +361,7 @@ void Level::edit_step(float time_step)
     }
     edit_state.last_mouse_position = mouse_pos;
 
-    Graphics::set_camera_position(edit_state.camera_position);
+    Graphics::Camera::position() = edit_state.camera_position;
 
     if(Platform::Input::key('Q'))
     {
@@ -415,7 +416,7 @@ void Level::edit_draw()
     static char level_0_buff[64] = "assets/data/levels/";
     if(ImGui::InputText("Set level 0", level_0_buff, sizeof(level_0_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
     {
-        // TODO: Temporary leak until the level table is formailzed
+        // TODO: Temporary leak until the level table is formalized
         char *file_path = new char[64];
         strcpy(file_path, level_0_buff);
         level_files[0] = file_path;
@@ -486,7 +487,7 @@ void Level::deserialize(Serialization::Stream *stream)
 
 void Level::reset(int level_num)
 {
-    LevelFilessMap::iterator it = level_files.find(level_num);
+    LevelFilesMap::iterator it = level_files.find(level_num);
     if(it != level_files.end())
     {
         char *path = it->second;
@@ -745,9 +746,9 @@ void Level::general_draw()
     if(focus_avatar_it != avatars.end())
     {
         Avatar *focus_avatar = focus_avatar_it->second;
-        Graphics::set_camera_position(focus_avatar->position + camera_offset);
+        Graphics::Camera::position() = focus_avatar->position + camera_offset;
     }
-    Graphics::set_camera_width(64.0f);
+    Graphics::Camera::width() = 64.0f;
 
     // Draw the players
     for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
@@ -769,7 +770,7 @@ void Level::general_draw()
 
             v2 world_pos = grid.cell_to_world(pos) + v2(1.0f, 1.0f) * grid.world_scale / 2.0f;
             float scale = grid.world_scale * 0.95f;
-            Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
+            Graphics::quad(world_pos, v2(scale, scale), 0.0f, color);
         }
 
         if(cell->win_when_touched)
@@ -777,7 +778,7 @@ void Level::general_draw()
             v4 color = v4(0.0f, 1.0f, 0.0f, 1.0f);
             v2 world_pos = grid.cell_to_world(pos) + v2(1.0f, 1.0f) * grid.world_scale / 2.0f;
             float scale = grid.world_scale * 0.95f;
-            Graphics::draw_quad(world_pos, v2(scale, scale), 0.0f, color);
+            Graphics::quad(world_pos, v2(scale, scale), 0.0f, color);
         }
     }
 }

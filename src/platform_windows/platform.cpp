@@ -505,7 +505,10 @@ GameMath::v2 Platform::Input::mouse_world_position()
         (p.y / screen_height) * 2.0f - 1.0f,
     };
 
-    return Graphics::ndc_point_to_world(ndc);
+    GameMath::v4 ndc4 = {ndc, 0.0f, 1.0f};
+    GameMath::v4 world4 = Graphics::world_m_ndc() * ndc4;
+
+    return GameMath::v2(world4.x, world4.y);
 }
 
 void Platform::Input::mouse_screen_position(int *x, int *y)
