@@ -8,6 +8,19 @@
 #include <map>
 
 
+
+struct Levels
+{
+    static struct LevelsState *instance;
+
+    static void init();
+    static struct Level *create_level(int level_num);
+    static void destroy_level(Level *level);
+
+    static void show_level_select(bool show);
+};
+
+
 struct Level
 {
 public:
@@ -136,5 +149,5 @@ private:
     void load_with_file(const char *path, bool reading);
 };
 
-Level *create_level(int level_num);
-void destroy_level(Level *level);
+
+

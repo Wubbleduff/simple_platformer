@@ -4,6 +4,7 @@ x64
 Debug
 Release
 .vs
+*.pdb
 intermediate
 run_trees
 builds

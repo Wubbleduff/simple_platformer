@@ -16,158 +16,17 @@
 #include <map>
 #include <algorithm>
 
-// DEBUG
 #include "imgui.h"
 
 
 
 using namespace GameMath;
 
-
-
-struct MenuState
-{
-    enum Screen
-    {
-        MAIN_MENU,
-        LEVEL_SELECT
-    };
-
-    Screen screen = MAIN_MENU;
-
-    void change_screen(Screen screen);
-    void step(float time_step);
-    void draw();
-    void draw_main_menu();
-    void draw_level_select();
-    void cleanup();
-};
-
-struct GameState
-{
-   enum Mode
-   {
-        INVALID,
-        MAIN_MENU,
-        PLAYING_LEVEL,
-        EDITING
-    };
-    Mode current_mode;
-    Mode next_mode;
-
-    GameInput::UID my_uid;
-    unsigned int frame_number;
-    std::vector<GameInput> inputs_this_frame;
-
-    MenuState *menu_state; // For main menu, win/lose screen, etc. (What about pause menu? idk...)
-    int level_to_start = 0;
-    Level *playing_level;  // For when the player is playing the game
-
-    void read_input_as_offline();
-    void read_input_as_client();
-    void read_input_as_server();
-    void step(GameInput::UID focus_uid, float time_step);
-    void draw();
-    void switch_game_mode(GameState::Mode mode);
-    void check_for_mode_switch();
-    void init_for_main_menu(bool initting);
-    void init_for_playing_level(bool initting);
-    void start_level(int level);
-    void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
-
-#if DEBUG
-    void draw_debug_ui();
-#endif
-};
-
-struct Timeline
-{
-    static const int MAX_STEPS_PER_UPDATE;
-    float seconds_since_last_step;
-    float last_update_time;
-    float step_frequency;
-    int next_step_time_index;
-    std::array<float, 120> step_times;
-
-    void reset();
-    void step_with_frequency(float freq);
-    void update();
-};
-const int Timeline::MAX_STEPS_PER_UPDATE = 10;
-
-// Engine processes game states
-struct Engine
-{
-    static Engine *instance;
-
-    static const float TARGET_STEP_TIME;
-
-    bool running;
-    Timeline *timeline = nullptr;
-
-    enum class NetworkMode
-    {
-        OFFLINE,
-        CLIENT,
-        SERVER,
-    };
-    NetworkMode network_mode;
-
-    struct Client
-    {
-        static const float TIMEOUT;
-
-        Network::Connection *server_connection;
-        float connecting_timeout_timer = 0.0f;
-
-        void disconnect_from_server();
-        bool is_connected();
-        void update_connection(float time_step);
-    } client;
-
-    struct Server
-    {
-        struct ClientConnection
-        {
-            GameInput::UID uid = 0;
-            Network::Connection *connection = nullptr;
-        };
-        std::vector<ClientConnection> client_connections;
-        GameInput::UID next_input_uid = 1;
-
-        bool startup(int port);
-        void shutdown();
-        void add_client_connection(Network::Connection *connection);
-        void remove_disconnected_clients();
-    } server;
-
-    GameState *current_game_state;
-
-
-
-    static void start();
-    static void stop();
-    static void init();
-    
-    // Switches to client mode and connects to a server
-    static void connect(const char *ip_address, int port);
-
-    // Switch to a network mode (local, client, server)
-    static void switch_network_mode(NetworkMode mode);
-
-    // Engine tick
-    static void do_one_step(float time_step);
-    static void step_as_offline(GameState *game_state, float time_step);
-    static void step_as_client(GameState *game_state, float time_step);
-    static void step_as_server(GameState *game_state, float time_step);
-
-    static void shutdown();
-};
 Engine *Engine::instance = nullptr;
-
 const float Engine::TARGET_STEP_TIME = 0.01666f;
+const int Timeline::MAX_STEPS_PER_UPDATE = 10;
 static const int SERVER_PORT = 4242;
-const float Engine::Client::TIMEOUT = 2.0f;
+const float Engine::Client::TIMEOUT = 4.0f;
 
 
 
@@ -260,6 +119,9 @@ void GameState::check_for_mode_switch()
             case MAIN_MENU:
                 init_for_main_menu(false);
                 break;
+            case LOBBY:
+                init_for_lobby(false);
+                break;
             case PLAYING_LEVEL:
                 init_for_playing_level(false);
                 break;
@@ -273,6 +135,9 @@ void GameState::check_for_mode_switch()
         {
             case MAIN_MENU:
                 init_for_main_menu(true);
+                break;
+            case LOBBY:
+                init_for_lobby(true);
                 break;
             case PLAYING_LEVEL:
                 init_for_playing_level(true);
@@ -296,6 +161,7 @@ void GameState::read_input_as_offline()
             // ...
             break;
 
+        case Mode::LOBBY:
         case Mode::PLAYING_LEVEL:
         {
             // Read input from local player
@@ -323,6 +189,7 @@ void GameState::read_input_as_client()
             // ...
             break;
 
+        case Mode::LOBBY:
         case Mode::PLAYING_LEVEL:
         {
             // Read input from local player
@@ -348,6 +215,8 @@ void GameState::read_input_as_server()
         case Mode::MAIN_MENU:
             // ...
             break;
+
+        case Mode::LOBBY:
         case Mode::PLAYING_LEVEL:
         {
             // Read local player's input
@@ -388,9 +257,13 @@ void GameState::step(GameInput::UID focus_uid, float time_step)
         case Mode::MAIN_MENU:
             menu_state->step(time_step);
             break;
+
+        case Mode::LOBBY:
         case Mode::PLAYING_LEVEL:
             playing_level->step(inputs_this_frame, time_step);
             break;
+
+
         case Mode::EDITING:
             playing_level->edit_step(time_step);
             break;
@@ -404,9 +277,12 @@ void GameState::draw()
     case Mode::MAIN_MENU:
         menu_state->draw();
         break;
+
+    case Mode::LOBBY:
     case Mode::PLAYING_LEVEL:
         playing_level->draw();
         break;
+
     case Mode::EDITING:
         //playing_level->edit_draw();
         break;
@@ -417,7 +293,7 @@ void GameState::serialize(Serialization::Stream *stream, GameInput::UID other_ui
 {
     if(serialize)
     {
-        assert(current_mode == PLAYING_LEVEL);
+        assert(current_mode == PLAYING_LEVEL || current_mode == LOBBY);
 
         stream->write(other_uid);
         stream->write(frame_number);
@@ -430,7 +306,7 @@ void GameState::serialize(Serialization::Stream *stream, GameInput::UID other_ui
     }
     else
     {
-        assert(current_mode == PLAYING_LEVEL);
+        assert(current_mode == PLAYING_LEVEL || current_mode == LOBBY);
 
         stream->read(&my_uid);
         stream->read(&frame_number);
@@ -468,6 +344,25 @@ void GameState::init_for_main_menu(bool initting)
     }
 }
 
+void GameState::init_for_lobby(bool initting)
+{
+    if(initting)
+    {
+        // Initialize state for playing level
+        my_uid = 0;
+        frame_number = 0;
+        inputs_this_frame.clear();
+        playing_level = Levels::create_level(0);
+        Levels::show_level_select(true);
+    }
+    else
+    {
+        Levels::show_level_select(false);
+        Levels::destroy_level(0);
+        playing_level = nullptr;
+    }
+}
+
 void GameState::init_for_playing_level(bool initting)
 {
     if(initting)
@@ -476,13 +371,18 @@ void GameState::init_for_playing_level(bool initting)
         my_uid = 0;
         frame_number = 0;
         inputs_this_frame.clear();
-        playing_level = create_level(level_to_start);
+        playing_level = Levels::create_level(level_to_start);
     }
     else
     {
-        destroy_level(playing_level);
+        Levels::destroy_level(playing_level);
         playing_level = nullptr;
     }
+}
+
+void GameState::start_lobby()
+{
+    switch_game_mode(Mode::LOBBY);
 }
 
 void GameState::start_level(int level)
@@ -508,9 +408,11 @@ void GameState::draw_debug_ui()
 }
 #endif
 
-void MenuState::change_screen(MenuState::Screen in_screen)
+void MenuState::change_menu(MenuState::Screen in_screen)
 {
     screen = in_screen;
+    confirming_quit_game = false;
+    maybe_show_has_timed_out = false;
 }
 
 void MenuState::step(float time_step)
@@ -526,54 +428,48 @@ void MenuState::draw()
             draw_main_menu();
             break;
 
-        case LEVEL_SELECT:
-            draw_level_select();
-            break;
-    }
+        case JOIN_PLAYER:
+            draw_join_player();
+            break; }
 }
 
 void MenuState::draw_main_menu()
 {
-    ImGuiWindowFlags window_flags = 0;
-    window_flags |= ImGuiWindowFlags_NoTitleBar;
-    window_flags |= ImGuiWindowFlags_NoScrollbar;
-    //window_flags |= ImGuiWindowFlags_MenuBar;
-    window_flags |= ImGuiWindowFlags_NoMove;
-    window_flags |= ImGuiWindowFlags_NoResize;
-    window_flags |= ImGuiWindowFlags_NoCollapse;
-    window_flags |= ImGuiWindowFlags_NoNav;
-    //window_flags |= ImGuiWindowFlags_NoBackground;
-    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus;
-    bool *p_open = NULL;
+    MenuState::menu_window_begin();
 
-    ImGui::SetNextWindowPos( ImVec2(0, 0) );
-    ImGui::SetNextWindowSize( ImVec2(Platform::Window::screen_width(), Platform::Window::screen_height()) );
-    ImGui::Begin("Main Menu", p_open, window_flags);
-    float button_scalar = Platform::Window::screen_width() * 0.2f;
-    ImVec2 button_size = ImVec2(button_scalar, button_scalar * 0.25f);
+    ImVec2 button_size = MenuState::button_size();
     if(ImGui::Button("Start", button_size))
     {
-        change_screen(LEVEL_SELECT);
+        Engine::instance->current_game_state->start_lobby();
     }
-    static char address_string[16] = "127.0.0.1";
-    if(ImGui::Button("Join player", button_size))
-    {
-        Engine::connect(address_string, SERVER_PORT);
-    }
-    ImGui::SameLine();
-    ImGui::InputText("Address", address_string, sizeof(address_string), 0);
 
-    if(ImGui::Button("Open lobby", button_size))
+    if(ImGui::Button("Join other player", button_size))
     {
-        Engine::switch_network_mode(Engine::NetworkMode::SERVER);
+        change_menu(JOIN_PLAYER);
     }
 
     for(int i = 0; i < 12; i++) ImGui::Spacing();
-    if(ImGui::Button("Quit game", button_size))
-    {
-        Engine::stop();
-    }
 
+    if(confirming_quit_game)
+    {
+        ImGui::Text("Are you sure?");
+        if(ImGui::Button("Quit", button_size))
+        {
+            Engine::stop();
+        }
+        ImGui::SameLine();
+        if(ImGui::Button("Cancel", button_size))
+        {
+            confirming_quit_game = false;
+        }
+    }
+    else
+    {
+        if(ImGui::Button("Quit game", button_size))
+        {
+            confirming_quit_game = true;
+        }
+    }
 
 #if DEBUG
     for(int i = 0; i < 12; i++) ImGui::Spacing();
@@ -588,45 +484,78 @@ void MenuState::draw_main_menu()
     ImGui::End();
 }
 
-void MenuState::draw_level_select()
+void MenuState::draw_join_player()
 {
-    ImGuiWindowFlags window_flags = 0;
-    window_flags |= ImGuiWindowFlags_NoTitleBar;
-    window_flags |= ImGuiWindowFlags_NoScrollbar;
-    //window_flags |= ImGuiWindowFlags_MenuBar;
-    window_flags |= ImGuiWindowFlags_NoMove;
-    window_flags |= ImGuiWindowFlags_NoResize;
-    window_flags |= ImGuiWindowFlags_NoCollapse;
-    window_flags |= ImGuiWindowFlags_NoNav;
-    //window_flags |= ImGuiWindowFlags_NoBackground;
-    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus;
-    bool *p_open = NULL;
+    MenuState::menu_window_begin();
 
-    ImGui::SetNextWindowPos( ImVec2(0, 0) );
-    ImGui::SetNextWindowSize( ImVec2(Platform::Window::screen_width(), Platform::Window::screen_height()) );
-    ImGui::Begin("Level select", p_open, window_flags);
-    float button_scalar = Platform::Window::screen_width() * 0.2f;
-    ImVec2 button_size = ImVec2(button_scalar, button_scalar * 0.25f);
-    if(ImGui::Button("Level 1", button_size))
+    ImVec2 button_size = MenuState::button_size();
+    static char address_string[16] = "127.0.0.1";
+    ImGui::PushItemWidth(button_size.x);
+    ImGui::InputText("IP Address", address_string, sizeof(address_string), 0);
+
+    // Draw connecting buttons
+    if(Engine::instance->client.connecting_timeout_timer > 0.0f)
     {
-        Engine::instance->current_game_state->start_level(0);
+        if(ImGui::Button("Cancel", button_size))
+        {
+            Engine::instance->client.connecting_timeout_timer = 0.0f;
+            Engine::instance->client.disconnect_from_server();
+            maybe_show_has_timed_out = false;
+        }
+        ImGui::SameLine();
+        ImGui::Text("Connecting...");
     }
-    if(ImGui::Button("Level 2", button_size))
+    else
     {
-        Engine::instance->current_game_state->start_level(1);
+        if(ImGui::Button("Connect", button_size))
+        {
+            Engine::connect(address_string, SERVER_PORT);
+            maybe_show_has_timed_out = true;
+        }
+        else
+        {
+            if(maybe_show_has_timed_out)
+            {
+                ImGui::SameLine();
+                ImGui::Text("Connection timed out!");
+            }
+        }
     }
 
     for(int i = 0; i < 12; i++) ImGui::Spacing();
     if(ImGui::Button("Main menu", button_size))
     {
-        change_screen(MAIN_MENU);
+        change_menu(MAIN_MENU);
     }
 
-    ImGui::End();
+    if(Platform::Input::key_down(Platform::Input::Key::ESC))
+    {
+        change_menu(MAIN_MENU);
+    }
+
+    MenuState::menu_window_end();
 }
 
 void MenuState::cleanup()
 {
+}
+
+void MenuState::menu_window_begin()
+{
+    bool *p_open = NULL;
+    ImGui::SetNextWindowPos( ImVec2(0, 0) );
+    ImGui::SetNextWindowSize( ImVec2(Platform::Window::screen_width(), Platform::Window::screen_height()) );
+    ImGui::Begin("Level select", p_open, MenuState::IMGUI_MENU_WINDOW_FLAGS);
+}
+void MenuState::menu_window_end()
+{
+    ImGui::End();
+}
+ImVec2 MenuState::button_size()
+{
+    float button_scalar = Platform::Window::screen_width() * 0.2f;
+    ImVec2 button_size = ImVec2(button_scalar, button_scalar * 0.25f);
+    return button_size;
 }
 
 
@@ -735,19 +664,25 @@ bool Engine::Client::is_connected()
 void Engine::Client::update_connection(float time_step)
 {
     if(server_connection == nullptr) return;
-    if(server_connection->is_connected()) return;
 
-    Log::log_info("Connecting...");
-    connecting_timeout_timer += time_step;
-    if(connecting_timeout_timer >= TIMEOUT)
+    server_connection->check_on_connection_status();
+
+    if(server_connection->is_connected())
     {
-        Log::log_info("Timeout connecting to server!");
-        disconnect_from_server();
+        Engine::instance->current_game_state->switch_game_mode(GameState::PLAYING_LEVEL);
         connecting_timeout_timer = 0.0f;
         return;
     }
 
-    server_connection->check_on_connection_status();
+    //Log::log_info("Connecting...");
+    connecting_timeout_timer += time_step;
+    if(connecting_timeout_timer >= TIMEOUT)
+    {
+        //Log::log_info("Timeout connecting to server!");
+        disconnect_from_server();
+        connecting_timeout_timer = 0.0f;
+        return;
+    }
 }
 
 
@@ -846,13 +781,14 @@ void Engine::step_as_offline(GameState *game_state, float time_step)
     }
 }
 
-// TODO: Pass the current game state and the client state here
 void Engine::step_as_client(GameState *game_state, float time_step)
 { 
-    game_state->check_for_mode_switch();
-
+    // This is before check_for_mode_switch because the connection might update the game mode
     Engine::instance->client.update_connection(time_step);
 
+    game_state->check_for_mode_switch();
+
+    
     // TODO:
     // Once doing client side prediction, read input using the game state's read_input
     // like other program states are doing
@@ -1197,6 +1133,7 @@ void Engine::start()
     GameConsole::init();
     Graphics::init();
     Network::init();
+    Levels::init();
 
     //seed_random(0);
     seed_random((int)(Platform::time_since_start() * 10000.0f));

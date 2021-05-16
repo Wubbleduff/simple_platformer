@@ -19,15 +19,25 @@ using namespace GameMath;
 
 
 
-// TODO: Global until I find a better place for this
 #define LEVELS_DIR "assets/data/levels/"
-typedef std::map<int, char *> LevelFilesMap;
-static LevelFilesMap level_files =
+struct LevelsState
 {
-    {0, LEVELS_DIR "level_0"},
-    {1, LEVELS_DIR "level_1"},
-    {2, LEVELS_DIR "level_2"}
+    Level *lobby_level = nullptr;
+
+    bool lobby_level_selecting = false;
+
+    typedef std::map<int, char *> LevelFilesMap;
+    LevelFilesMap level_files =
+    {
+        {0, LEVELS_DIR "lobby"},
+        {1, LEVELS_DIR "level_1"},
+        {2, LEVELS_DIR "level_2"}
+    };
 };
+LevelsState *Levels::instance = nullptr;
+
+
+
 
 
 
@@ -345,6 +355,7 @@ void Level::step(GameInputList inputs, float time_step)
         case WIN:     { win_step(inputs, time_step); break; }
         case LOSS:    { loss_step(inputs, time_step); break; }
     }
+
 }
 
 void Level::edit_step(float time_step)
@@ -394,6 +405,7 @@ void Level::draw()
         case WIN:     { win_draw(); break; }
         case LOSS:    { loss_draw(); break; }
     }
+
 }
 
 void Level::edit_draw()
@@ -419,7 +431,7 @@ void Level::edit_draw()
         // TODO: Temporary leak until the level table is formalized
         char *file_path = new char[64];
         strcpy(file_path, level_0_buff);
-        level_files[0] = file_path;
+        Levels::instance->level_files[0] = file_path;
     }
     ImGui::End();
 }
@@ -487,8 +499,8 @@ void Level::deserialize(Serialization::Stream *stream)
 
 void Level::reset(int level_num)
 {
-    LevelFilesMap::iterator it = level_files.find(level_num);
-    if(it != level_files.end())
+    LevelsState::LevelFilesMap::iterator it = Levels::instance->level_files.find(level_num);
+    if(it != Levels::instance->level_files.end())
     {
         char *path = it->second;
         load_with_file(path, true);
@@ -624,11 +636,11 @@ void Level::playing_step(GameInputList inputs, float time_step)
 
     // Check local input for menus
     // This is assuming that the platform input has been read at this point
-    if(Platform::Input::key_down('M'))
+    if(Platform::Input::key_down(Platform::Input::Key::ESC))
     {
         change_mode(PAUSED);
     }
-    if(Platform::Input::key_down('N'))
+    if(Platform::Input::key_down('R'))
     {
         reset_to_default_level();
     }
@@ -651,6 +663,30 @@ void Level::loss_step(GameInputList inputs, float time_step)
 void Level::playing_draw()
 {
     general_draw();
+
+    if(Levels::instance->lobby_level_selecting)
+    {
+        ImGui::Begin("Select level");
+
+        if(ImGui::Button("Level 1"))
+        {
+            Engine::instance->current_game_state->start_level(1);
+        }
+        if(ImGui::Button("Level 2"))
+        {
+            Engine::instance->current_game_state->start_level(2);
+        }
+        if(ImGui::Button("Open lobby"))
+        {
+            Engine::switch_network_mode(Engine::NetworkMode::SERVER);
+        }
+        if(ImGui::Button("Close lobby"))
+        {
+            Engine::switch_network_mode(Engine::NetworkMode::OFFLINE);
+        }
+
+        ImGui::End();
+    }
 }
 
 static void begin_base_menu()
@@ -705,7 +741,7 @@ void Level::win_draw()
     ImVec2 button_size = get_button_size();
 
     int next_level_num = number + 1;
-    if(next_level_num < level_files.size())
+    if(next_level_num < Levels::instance->level_files.size())
     {
         if(ImGui::Button("Next Level", button_size))
         {
@@ -809,16 +845,28 @@ void Level::load_with_file(const char *path, bool reading)
 
 
 
-Level *create_level(int level_num)
+void Levels::init()
+{
+    instance = new LevelsState();
+
+    instance->lobby_level = create_level(0);
+}
+
+Level *Levels::create_level(int level_num)
 {
     Level *new_level = new Level();
     new_level->reset(level_num);
     return new_level;
 }
 
-void destroy_level(Level *level)
+void Levels::destroy_level(Level *level)
 {
     level->cleanup();
     delete level;
+}
+
+void Levels::show_level_select(bool show)
+{
+    instance->lobby_level_selecting = show;
 }
 
