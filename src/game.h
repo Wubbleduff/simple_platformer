@@ -7,36 +7,7 @@
 #include <vector>
 #include <array>
 
-struct MenuState
-{
-    enum Screen
-    {
-        MAIN_MENU,
-        JOIN_PLAYER
-    };
 
-    Screen screen = MAIN_MENU;
-    bool confirming_quit_game = false;
-    bool maybe_show_has_timed_out = false;
-
-    static const ImGuiWindowFlags IMGUI_MENU_WINDOW_FLAGS =
-        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar  |
-        ImGuiWindowFlags_MenuBar    | ImGuiWindowFlags_NoMove       |
-        ImGuiWindowFlags_NoResize   | ImGuiWindowFlags_NoCollapse   |
-        ImGuiWindowFlags_NoNav      | ImGuiWindowFlags_NoBackground |
-        ImGuiWindowFlags_NoBringToFrontOnFocus;
-
-    void change_menu(Screen screen);
-    void step(float time_step);
-    void draw();
-    void draw_main_menu();
-    void draw_join_player();
-    void cleanup();
-
-    static void menu_window_begin();
-    static void menu_window_end();
-    static ImVec2 button_size();
-};
 
 struct GameInput
 {
@@ -56,7 +27,7 @@ struct GameInput
 
     bool action(Action action);
 
-    void read_from_local();
+    void read_from_local(GameMath::v2 avatar_position);
     bool read_from_connection(Network::Connection **connection);
     void serialize(Serialization::Stream *stream, bool serialize);
 };
@@ -66,37 +37,89 @@ struct GameState
 {
     enum Mode
     {
-        INVALID,
         MAIN_MENU,
         LOBBY,
-        PLAYING_LEVEL,
-        EDITING
+        PLAYING_LEVEL
     };
-    Mode current_mode;
-    Mode next_mode;
 
-    GameInput::UID my_uid;
     unsigned int frame_number;
-    std::vector<GameInput> inputs_this_frame;
+    GameInput::UID my_uid;
+    GameInputList inputs_this_frame;
 
-    MenuState *menu_state; // For main menu, win/lose screen, etc. (What about pause menu? idk...)
-    int level_to_start = 0;
-    struct Level *playing_level;  // For when the player is playing the game
+    virtual void init() = 0;
+    virtual void uninit();
 
-    void read_input_as_offline();
-    void read_input_as_client();
-    void read_input_as_server();
+    virtual void read_input();
+    virtual void step(GameInput::UID focus_uid, float time_step);
+    virtual void draw();
+    virtual void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
+#if DEBUG
+    virtual void draw_debug_ui();
+#endif
+};
+
+struct GameStateMenu : GameState
+{
+    enum Screen
+    {
+        MAIN_MENU,
+        JOIN_PLAYER
+    } screen = MAIN_MENU;
+    bool confirming_quit_game = false;
+    bool maybe_show_has_timed_out = false;
+    static const ImGuiWindowFlags IMGUI_MENU_WINDOW_FLAGS =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar  |
+        ImGuiWindowFlags_MenuBar    | ImGuiWindowFlags_NoMove       |
+        ImGuiWindowFlags_NoResize   | ImGuiWindowFlags_NoCollapse   |
+        ImGuiWindowFlags_NoNav      | ImGuiWindowFlags_NoBackground |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+    void init();
+    void uninit();
+    void read_input();
     void step(GameInput::UID focus_uid, float time_step);
     void draw();
-    void switch_game_mode(GameState::Mode mode);
-    void check_for_mode_switch();
-    void init_for_main_menu(bool initting);
-    void init_for_lobby(bool initting);
-    void init_for_playing_level(bool initting);
-    void start_lobby();
-    void start_level(int level);
+    void draw_main_menu();
+    void draw_join_player();
     void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
+#if DEBUG
+    void draw_debug_ui();
+#endif
 
+    void change_menu(Screen screen);
+
+    static void menu_window_begin();
+    static void menu_window_end();
+    static ImVec2 button_size();
+
+};
+
+struct GameStateLobby: GameState
+{
+    struct Level *level;
+
+    void init();
+    void uninit();
+    void read_input();
+    void step(GameInput::UID focus_uid, float time_step);
+    void draw();
+    void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
+#if DEBUG
+    void draw_debug_ui();
+#endif
+};
+
+struct GameStateLevel : GameState
+{
+    int playing_level_num = 1;
+    struct Level *playing_level;
+
+    void init();
+    void uninit();
+    void read_input();
+    void step(GameInput::UID focus_uid, float time_step);
+    void draw();
+    void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
 #if DEBUG
     void draw_debug_ui();
 #endif
@@ -163,12 +186,16 @@ struct Engine
     } server;
 
     GameState *current_game_state;
+    GameState::Mode current_mode;
+    GameState::Mode next_mode;
 
 
 
     static void start();
     static void stop();
     static void init();
+
+    static void switch_game_state(GameState::Mode mode);
 
     // Switches to client mode and connects to a server
     static void connect(const char *ip_address, int port);

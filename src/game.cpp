@@ -63,7 +63,7 @@ void GameInput::serialize(Serialization::Stream *stream, bool serialize)
 }
 
 // TODO: Should I pass current_game_state here?
-void GameInput::read_from_local()
+void GameInput::read_from_local(v2 avatar_pos)
 {
     current_actions[(int)Action::JUMP] = Platform::Input::key_down(' ');
     current_actions[(int)Action::SHOOT] = Platform::Input::mouse_button_down(0);
@@ -74,7 +74,7 @@ void GameInput::read_from_local()
     current_horizontal_movement = h;
 
     // TODO: This is spooky
-    v2 avatar_pos = Engine::instance->current_game_state->playing_level->get_avatar_position(uid);
+    //v2 avatar_pos = Engine::instance->current_game_state->playing_level->get_avatar_position(uid);
     current_aiming_direction = Platform::Input::mouse_world_position() - avatar_pos;
 }
 
@@ -109,318 +109,67 @@ bool GameInput::read_from_connection(Network::Connection **connection)
 
 
 
-void GameState::check_for_mode_switch()
+
+void GameState::init()
 {
-    if(current_mode != next_mode)
-    {
-        // Clean up previous state
-        switch(current_mode)
-        {
-            case MAIN_MENU:
-                init_for_main_menu(false);
-                break;
-            case LOBBY:
-                init_for_lobby(false);
-                break;
-            case PLAYING_LEVEL:
-                init_for_playing_level(false);
-                break;
-            case EDITING:
-                init_for_playing_level(false);
-                break;
-        }
-
-        // Init next state
-        switch(next_mode)
-        {
-            case MAIN_MENU:
-                init_for_main_menu(true);
-                break;
-            case LOBBY:
-                init_for_lobby(true);
-                break;
-            case PLAYING_LEVEL:
-                init_for_playing_level(true);
-                break;
-            case EDITING:
-                init_for_playing_level(true);
-                break;
-        }
-
-        current_mode = next_mode;
-    }
+    my_uid = 0;
+    frame_number = 0;
+    inputs_this_frame.clear();
 }
 
-void GameState::read_input_as_offline()
+void GameState::uninit()
 {
-    inputs_this_frame.clear();
-
-    switch(current_mode)
-    {
-        case Mode::MAIN_MENU:
-            // ...
-            break;
-
-        case Mode::LOBBY:
-        case Mode::PLAYING_LEVEL:
-        {
-            // Read input from local player
-            GameInput local_input;
-            local_input.uid = 0;
-            local_input.read_from_local();
-            inputs_this_frame.push_back(local_input);
-        }
-        break;
-
-        case Mode::EDITING:
-            // ...
-            break;
-    }
-
 }
 
-void GameState::read_input_as_client()
+void GameState::read_input()
 {
-    inputs_this_frame.clear();
-
-    switch(current_mode)
-    {
-        case Mode::MAIN_MENU:
-            // ...
-            break;
-
-        case Mode::LOBBY:
-        case Mode::PLAYING_LEVEL:
-        {
-            // Read input from local player
-            GameInput local_input;
-            //local_input.uid = 0; This field doesn't matter since we're sending an input list to the server, it will just discard the uid
-            local_input.read_from_local();
-            inputs_this_frame.push_back(local_input);
-        }
-        break;
-
-        case Mode::EDITING:
-            // ...
-            break;
-    }
-}
-
-void GameState::read_input_as_server()
-{
-    inputs_this_frame.clear();
-
-    switch(current_mode)
-    {
-        case Mode::MAIN_MENU:
-            // ...
-            break;
-
-        case Mode::LOBBY:
-        case Mode::PLAYING_LEVEL:
-        {
-            // Read local player's input
-            GameInput local_input;
-            local_input.uid = 0;
-            local_input.read_from_local();
-            inputs_this_frame.push_back(local_input);
-
-            // Read remote player's input
-            for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
-            {
-                GameInput remote_input;
-                remote_input.uid = client.uid;
-                remote_input.read_from_connection(&(client.connection));
-                if(client.connection != nullptr)
-                {
-                    inputs_this_frame.push_back(remote_input);
-                }
-            }
-            // Clean out disconnected connections
-            Engine::instance->server.remove_disconnected_clients();
-
-        }
-        break;
-
-        case Mode::EDITING:
-            // ...
-            break;
-    }
 }
 
 void GameState::step(GameInput::UID focus_uid, float time_step)
 {
     my_uid = focus_uid;
     frame_number++;
-    switch(current_mode)
-    {
-        case Mode::MAIN_MENU:
-            menu_state->step(time_step);
-            break;
-
-        case Mode::LOBBY:
-        case Mode::PLAYING_LEVEL:
-            playing_level->step(inputs_this_frame, time_step);
-            break;
-
-
-        case Mode::EDITING:
-            playing_level->edit_step(time_step);
-            break;
-    }
 }
 
 void GameState::draw()
 {
-    switch(current_mode)
-    {
-    case Mode::MAIN_MENU:
-        menu_state->draw();
-        break;
-
-    case Mode::LOBBY:
-    case Mode::PLAYING_LEVEL:
-        playing_level->draw();
-        break;
-
-    case Mode::EDITING:
-        //playing_level->edit_draw();
-        break;
-    }
 }
 
-void GameState::serialize(Serialization::Stream *stream, GameInput::UID other_uid, bool serialize)
+void GameState::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
 {
-    if(serialize)
-    {
-        assert(current_mode == PLAYING_LEVEL || current_mode == LOBBY);
-
-        stream->write(other_uid);
-        stream->write(frame_number);
-        stream->write((int)inputs_this_frame.size());
-        for(GameInput &input : inputs_this_frame)
-        {
-            input.serialize(stream, true);
-        }
-        playing_level->serialize(stream);
-    }
-    else
-    {
-        assert(current_mode == PLAYING_LEVEL || current_mode == LOBBY);
-
-        stream->read(&my_uid);
-        stream->read(&frame_number);
-        int num_inputs;
-        stream->read(&num_inputs);
-        inputs_this_frame.resize(num_inputs);
-        for(int i = 0; i < num_inputs; i++)
-        {
-            GameInput *target = &(inputs_this_frame[i]);
-            target->serialize(stream, false);
-        }
-        playing_level->deserialize(stream);
-    }
-}
-
-
-
-void GameState::switch_game_mode(GameState::Mode mode)
-{
-    next_mode = mode;
-}
-
-void GameState::init_for_main_menu(bool initting)
-{
-    if(initting)
-    {
-        // Initialize state for menu
-        menu_state = new MenuState();
-    }
-    else
-    {
-        if(menu_state) menu_state->cleanup();
-        delete menu_state;
-        menu_state = nullptr;
-    }
-}
-
-void GameState::init_for_lobby(bool initting)
-{
-    if(initting)
-    {
-        // Initialize state for playing level
-        my_uid = 0;
-        frame_number = 0;
-        inputs_this_frame.clear();
-        playing_level = Levels::create_level(0);
-        Levels::show_level_select(true);
-    }
-    else
-    {
-        Levels::show_level_select(false);
-        Levels::destroy_level(0);
-        playing_level = nullptr;
-    }
-}
-
-void GameState::init_for_playing_level(bool initting)
-{
-    if(initting)
-    {
-        // Initialize state for playing level
-        my_uid = 0;
-        frame_number = 0;
-        inputs_this_frame.clear();
-        playing_level = Levels::create_level(level_to_start);
-    }
-    else
-    {
-        Levels::destroy_level(playing_level);
-        playing_level = nullptr;
-    }
-}
-
-void GameState::start_lobby()
-{
-    switch_game_mode(Mode::LOBBY);
-}
-
-void GameState::start_level(int level)
-{
-    level_to_start = level;
-    switch_game_mode(Mode::PLAYING_LEVEL);
 }
 
 #if DEBUG
 void GameState::draw_debug_ui()
 {
-    switch(current_mode)
-    {
-    case Mode::MAIN_MENU:
-        break;
-    case Mode::PLAYING_LEVEL:
-        playing_level->draw_debug_ui();
-        break;
-    case Mode::EDITING:
-        playing_level->edit_draw();
-        break;
-    }
 }
 #endif
 
-void MenuState::change_menu(MenuState::Screen in_screen)
+
+
+void GameStateMenu::init()
 {
-    screen = in_screen;
+    GameState::init();
+
+    screen = MAIN_MENU;
     confirming_quit_game = false;
     maybe_show_has_timed_out = false;
 }
 
-void MenuState::step(float time_step)
+void GameStateMenu::uninit()
 {
 }
 
-// TODO: Should I pass current_game_state here?
-void MenuState::draw()
+void GameStateMenu::read_input()
+{
+}
+
+void GameStateMenu::step(GameInput::UID focus_uid, float time_step)
+{
+    GameState::step(focus_uid, time_step);
+}
+
+void GameStateMenu::draw()
 {
     switch(screen)
     {
@@ -430,20 +179,20 @@ void MenuState::draw()
 
         case JOIN_PLAYER:
             draw_join_player();
-            break; }
+            break;
+    }
 }
 
-void MenuState::draw_main_menu()
+void GameStateMenu::draw_main_menu()
 {
-    MenuState::menu_window_begin();
+    menu_window_begin();
 
-    ImVec2 button_size = MenuState::button_size();
-    if(ImGui::Button("Start", button_size))
+    if(ImGui::Button("Start", button_size()))
     {
-        Engine::instance->current_game_state->start_lobby();
+        Engine::switch_game_state(GameState::LOBBY);
     }
 
-    if(ImGui::Button("Join other player", button_size))
+    if(ImGui::Button("Join other player", button_size()))
     {
         change_menu(JOIN_PLAYER);
     }
@@ -453,19 +202,19 @@ void MenuState::draw_main_menu()
     if(confirming_quit_game)
     {
         ImGui::Text("Are you sure?");
-        if(ImGui::Button("Quit", button_size))
+        if(ImGui::Button("Quit", button_size()))
         {
             Engine::stop();
         }
         ImGui::SameLine();
-        if(ImGui::Button("Cancel", button_size))
+        if(ImGui::Button("Cancel", button_size()))
         {
             confirming_quit_game = false;
         }
     }
     else
     {
-        if(ImGui::Button("Quit game", button_size))
+        if(ImGui::Button("Quit game", button_size()))
         {
             confirming_quit_game = true;
         }
@@ -473,30 +222,29 @@ void MenuState::draw_main_menu()
 
 #if DEBUG
     for(int i = 0; i < 12; i++) ImGui::Spacing();
-    if(ImGui::Button("Edit Game", button_size))
+    if(ImGui::Button("Edit Game", button_size()))
     {
         // TODO: Here
         // Do something like Engine::start_editing()
-        Engine::instance->current_game_state->switch_game_mode(GameState::Mode::EDITING);
+        //Engine::instance->current_game_state->switch_game_mode(GameState::Mode::EDITING);
     }
 #endif
 
     ImGui::End();
 }
 
-void MenuState::draw_join_player()
+void GameStateMenu::draw_join_player()
 {
-    MenuState::menu_window_begin();
+    menu_window_begin();
 
-    ImVec2 button_size = MenuState::button_size();
     static char address_string[16] = "127.0.0.1";
-    ImGui::PushItemWidth(button_size.x);
+    ImGui::PushItemWidth(button_size().x);
     ImGui::InputText("IP Address", address_string, sizeof(address_string), 0);
 
     // Draw connecting buttons
     if(Engine::instance->client.connecting_timeout_timer > 0.0f)
     {
-        if(ImGui::Button("Cancel", button_size))
+        if(ImGui::Button("Cancel", button_size()))
         {
             Engine::instance->client.connecting_timeout_timer = 0.0f;
             Engine::instance->client.disconnect_from_server();
@@ -507,7 +255,7 @@ void MenuState::draw_join_player()
     }
     else
     {
-        if(ImGui::Button("Connect", button_size))
+        if(ImGui::Button("Connect", button_size()))
         {
             Engine::connect(address_string, SERVER_PORT);
             maybe_show_has_timed_out = true;
@@ -523,7 +271,7 @@ void MenuState::draw_join_player()
     }
 
     for(int i = 0; i < 12; i++) ImGui::Spacing();
-    if(ImGui::Button("Main menu", button_size))
+    if(ImGui::Button("Main menu", button_size()))
     {
         change_menu(MAIN_MENU);
     }
@@ -533,30 +281,278 @@ void MenuState::draw_join_player()
         change_menu(MAIN_MENU);
     }
 
-    MenuState::menu_window_end();
+    menu_window_end();
 }
 
-void MenuState::cleanup()
+void GameStateMenu::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
 {
 }
 
-void MenuState::menu_window_begin()
+#if DEBUG
+void GameStateMenu::draw_debug_ui()
+{
+}
+#endif
+
+void GameStateMenu::change_menu(Screen in_screen)
+{
+    screen = in_screen;
+}
+
+void GameStateMenu::menu_window_begin()
 {
     bool *p_open = NULL;
     ImGui::SetNextWindowPos( ImVec2(0, 0) );
     ImGui::SetNextWindowSize( ImVec2(Platform::Window::screen_width(), Platform::Window::screen_height()) );
-    ImGui::Begin("Level select", p_open, MenuState::IMGUI_MENU_WINDOW_FLAGS);
+    ImGui::Begin("Level select", p_open, IMGUI_MENU_WINDOW_FLAGS);
 }
-void MenuState::menu_window_end()
+void GameStateMenu::menu_window_end()
 {
     ImGui::End();
 }
-ImVec2 MenuState::button_size()
+ImVec2 GameStateMenu::button_size()
 {
     float button_scalar = Platform::Window::screen_width() * 0.2f;
     ImVec2 button_size = ImVec2(button_scalar, button_scalar * 0.25f);
     return button_size;
 }
+
+
+
+void GameStateLobby::init()
+{
+    // Initialize state for playing level
+    my_uid = 0;
+    frame_number = 0;
+    inputs_this_frame.clear();
+    Levels::start_level(0);
+    level = Levels::get_active_level();
+}
+
+void GameStateLobby::uninit()
+{
+    //Levels::destroy_level(playing_level);
+    level = nullptr;
+}
+
+void GameStateLobby::read_input()
+{
+    inputs_this_frame.clear();
+
+    // Read input from local player
+    GameInput local_input;
+    // If we're a client, this field doesn't matter since we're sending
+    // an input list to the server, it will just discard the uid
+    local_input.uid = 0;
+    v2 avatar_pos = v2();
+    if(!level->avatars.empty() && level->avatars[0] != nullptr)
+    {
+        avatar_pos = level->avatars[0]->position;
+    }
+    local_input.read_from_local(avatar_pos);
+    inputs_this_frame.push_back(local_input);
+
+    // If we're a server, read inputs from all clients
+    if(Engine::instance->network_mode == Engine::NetworkMode::SERVER)
+    {
+        // Read remote player's input
+        for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
+        {
+            GameInput remote_input;
+            remote_input.uid = client.uid;
+            remote_input.read_from_connection(&(client.connection));
+            if(client.connection != nullptr)
+            {
+                inputs_this_frame.push_back(remote_input);
+            }
+        }
+        // Clean out disconnected connections
+        Engine::instance->server.remove_disconnected_clients();
+    }
+}
+
+void GameStateLobby::step(GameInput::UID focus_uid, float time_step)
+{
+    GameState::step(focus_uid, time_step);
+    level->step(inputs_this_frame, time_step);
+}
+
+void GameStateLobby::draw()
+{
+    level->draw();
+
+    ImGui::Begin("Select level");
+
+    if(ImGui::Button("Level 1"))
+    {
+        Engine::switch_game_state(GameState::PLAYING_LEVEL);
+        Levels::start_level(1);
+    }
+    if(ImGui::Button("Level 2"))
+    {
+        Engine::switch_game_state(GameState::PLAYING_LEVEL);
+        Levels::start_level(2);
+    }
+    if(ImGui::Button("Open lobby"))
+    {
+        Engine::switch_network_mode(Engine::NetworkMode::SERVER);
+    }
+    if(ImGui::Button("Close lobby"))
+    {
+        Engine::switch_network_mode(Engine::NetworkMode::OFFLINE);
+    }
+
+    ImGui::End();
+}
+
+void GameStateLobby::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
+{
+    if(serialize)
+    {
+        stream->write(uid);
+        stream->write(frame_number);
+        stream->write((int)inputs_this_frame.size());
+        for(GameInput &input : inputs_this_frame)
+        {
+            input.serialize(stream, true);
+        }
+        level->serialize(stream);
+    }
+    else
+    {
+        stream->read(&my_uid);
+        stream->read(&frame_number);
+        int num_inputs;
+        stream->read(&num_inputs);
+        inputs_this_frame.resize(num_inputs);
+        for(int i = 0; i < num_inputs; i++)
+        {
+            GameInput *target = &(inputs_this_frame[i]);
+            target->serialize(stream, false);
+        }
+        level->deserialize(stream);
+    }
+}
+
+#if DEBUG
+void GameStateLobby::draw_debug_ui()
+{
+    level->draw_debug_ui();
+    //playing_level->edit_draw();
+}
+#endif
+
+
+
+void GameStateLevel::init()
+{
+    // Initialize state for playing level
+    my_uid = 0;
+    frame_number = 0;
+    inputs_this_frame.clear();
+    Levels::start_level(0);
+    playing_level_num = 0;
+    playing_level = Levels::get_active_level();
+}
+
+void GameStateLevel::uninit()
+{
+    //Levels::destroy_level(playing_level);
+    playing_level = nullptr;
+}
+
+void GameStateLevel::read_input()
+{
+    inputs_this_frame.clear();
+
+    // Read input from local player
+    GameInput local_input;
+    // If we're a client, this field doesn't matter since we're sending
+    // an input list to the server, it will just discard the uid
+    local_input.uid = 0;
+    v2 avatar_pos = v2();
+    if(!playing_level->avatars.empty() && playing_level->avatars[0] != nullptr)
+    {
+        avatar_pos = playing_level->avatars[0]->position;
+    }
+    local_input.read_from_local(avatar_pos);
+    inputs_this_frame.push_back(local_input);
+
+    // If we're a server, read inputs from all clients
+    if(Engine::instance->network_mode == Engine::NetworkMode::SERVER)
+    {
+        // Read remote player's input
+        for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
+        {
+            GameInput remote_input;
+            remote_input.uid = client.uid;
+            remote_input.read_from_connection(&(client.connection));
+            if(client.connection != nullptr)
+            {
+                inputs_this_frame.push_back(remote_input);
+            }
+        }
+        // Clean out disconnected connections
+        Engine::instance->server.remove_disconnected_clients();
+    }
+}
+
+void GameStateLevel::step(GameInput::UID focus_uid, float time_step)
+{
+    GameState::step(focus_uid, time_step);
+    playing_level->step(inputs_this_frame, time_step);
+}
+
+void GameStateLevel::draw()
+{
+    playing_level->draw();
+}
+
+void GameStateLevel::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
+{
+    if(serialize)
+    {
+        stream->write(uid);
+        stream->write(frame_number);
+        stream->write((int)inputs_this_frame.size());
+        for(GameInput &input : inputs_this_frame)
+        {
+            input.serialize(stream, true);
+        }
+        playing_level->serialize(stream);
+    }
+    else
+    {
+        stream->read(&my_uid);
+        stream->read(&frame_number);
+        int num_inputs;
+        stream->read(&num_inputs);
+        inputs_this_frame.resize(num_inputs);
+        for(int i = 0; i < num_inputs; i++)
+        {
+            GameInput *target = &(inputs_this_frame[i]);
+            target->serialize(stream, false);
+        }
+        playing_level->deserialize(stream);
+    }
+}
+
+#if DEBUG
+void GameStateLevel::draw_debug_ui()
+{
+    playing_level->draw_debug_ui();
+    //playing_level->edit_draw();
+}
+#endif
+
+
+
+
+
+
+
+
+
 
 
 
@@ -652,7 +648,7 @@ void Engine::Client::disconnect_from_server()
     Network::disconnect(&server_connection);
 
     // Reset the level's state
-    instance->current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
+    Engine::switch_game_state(GameState::MAIN_MENU);
 }
 
 bool Engine::Client::is_connected()
@@ -669,7 +665,7 @@ void Engine::Client::update_connection(float time_step)
 
     if(server_connection->is_connected())
     {
-        Engine::instance->current_game_state->switch_game_mode(GameState::PLAYING_LEVEL);
+        Engine::switch_game_state(GameState::PLAYING_LEVEL);
         connecting_timeout_timer = 0.0f;
         return;
     }
@@ -724,10 +720,8 @@ void Engine::Server::remove_disconnected_clients()
 
 void Engine::step_as_offline(GameState *game_state, float time_step)
 {
-    game_state->check_for_mode_switch();
-
     Platform::Input::read_input();
-    game_state->read_input_as_offline();
+    game_state->read_input();
 
     game_state->step(0, time_step);
 
@@ -785,9 +779,6 @@ void Engine::step_as_client(GameState *game_state, float time_step)
 { 
     // This is before check_for_mode_switch because the connection might update the game mode
     Engine::instance->client.update_connection(time_step);
-
-    game_state->check_for_mode_switch();
-
     
     // TODO:
     // Once doing client side prediction, read input using the game state's read_input
@@ -802,7 +793,7 @@ void Engine::step_as_client(GameState *game_state, float time_step)
     {
         Serialization::Stream *input_stream = Serialization::make_stream();
 
-        game_state->read_input_as_client();
+        game_state->read_input();
 
         for(GameInput &input : game_state->inputs_this_frame)
         {
@@ -936,8 +927,6 @@ void Engine::step_as_client(GameState *game_state, float time_step)
 // TODO: Pass the current game state and server state here
 void Engine::step_as_server(GameState *game_state, float time_step)
 {
-    game_state->check_for_mode_switch();
-
     // Accept new connections to the server
     std::vector<Network::Connection *> new_connections = Network::accept_client_connections();
     for(int i = 0; i < new_connections.size(); i++)
@@ -948,7 +937,7 @@ void Engine::step_as_server(GameState *game_state, float time_step)
 
     // Prepare for reading input
     Platform::Input::read_input();
-    game_state->read_input_as_server();
+    game_state->read_input();
 
     // Step the game state using all inputs
     game_state->step(0, time_step);
@@ -1017,6 +1006,32 @@ void Engine::step_as_server(GameState *game_state, float time_step)
 void Engine::do_one_step(float time_step)
 {
     GameState *current_game_state = instance->current_game_state;
+
+    if(instance->next_mode != instance->current_mode)
+    {
+        current_game_state->uninit();
+        delete current_game_state;
+
+        switch(instance->next_mode)
+        {
+        case GameState::Mode::MAIN_MENU:
+            instance->current_game_state = new GameStateMenu();
+            break;
+        case GameState::Mode::LOBBY:
+            instance->current_game_state = new GameStateLobby();
+            break;
+        case GameState::Mode::PLAYING_LEVEL:
+            instance->current_game_state = new GameStateLevel();
+            break;
+        default:
+            instance->current_game_state = nullptr;
+        }
+        current_game_state = instance->current_game_state;
+
+        current_game_state->init();
+
+        instance->current_mode = instance->next_mode;
+    }
 
     switch(instance->network_mode)
     {
@@ -1091,12 +1106,16 @@ void Engine::init()
     instance->timeline = new Timeline();
 
     instance->network_mode = Engine::NetworkMode::OFFLINE;
-    instance->current_game_state = new GameState();
-    instance->current_game_state->current_mode = GameState::Mode::INVALID;
-    instance->current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
+    instance->current_game_state = new GameStateMenu();
+    instance->current_game_state->init();
 
     instance->timeline->reset();
     instance->timeline->step_with_frequency(Engine::TARGET_STEP_TIME);
+}
+
+void Engine::switch_game_state(GameState::Mode mode)
+{
+    instance->next_mode = mode;
 }
 
 void Engine::shutdown()
@@ -1175,7 +1194,7 @@ void Game::stop() { Engine::stop(); }
 // TODO: Make this like "CurrentGameState::exit_to_main_menu()" or something like that
 void Game::exit_to_main_menu()
 {
-    Engine::instance->current_game_state->switch_game_mode(GameState::Mode::MAIN_MENU);
+    Engine::switch_game_state(GameState::MAIN_MENU);
     Engine::switch_network_mode(Engine::NetworkMode::OFFLINE);
 }
 

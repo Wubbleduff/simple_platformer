@@ -17,7 +17,10 @@ struct Levels
     static struct Level *create_level(int level_num);
     static void destroy_level(Level *level);
 
+    static void start_level(int level);
     static void show_level_select(bool show);
+
+    static struct Level *get_active_level();
 };
 
 
