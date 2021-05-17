@@ -111,7 +111,6 @@ struct GameStateLobby: GameState
 
 struct GameStateLevel : GameState
 {
-    int playing_level_num = 1;
     struct Level *playing_level;
 
     void init();
@@ -188,6 +187,7 @@ struct Engine
     GameState *current_game_state;
     GameState::Mode current_mode;
     GameState::Mode next_mode;
+    bool editing = false;
 
 
 

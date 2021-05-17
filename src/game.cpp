@@ -224,9 +224,9 @@ void GameStateMenu::draw_main_menu()
     for(int i = 0; i < 12; i++) ImGui::Spacing();
     if(ImGui::Button("Edit Game", button_size()))
     {
-        // TODO: Here
-        // Do something like Engine::start_editing()
-        //Engine::instance->current_game_state->switch_game_mode(GameState::Mode::EDITING);
+        Engine::switch_game_state(GameState::PLAYING_LEVEL);
+        Levels::start_level(0);
+        Engine::instance->editing = true;
     }
 #endif
 
@@ -438,7 +438,6 @@ void GameStateLobby::serialize(Serialization::Stream *stream, GameInput::UID uid
 void GameStateLobby::draw_debug_ui()
 {
     level->draw_debug_ui();
-    //playing_level->edit_draw();
 }
 #endif
 
@@ -450,8 +449,6 @@ void GameStateLevel::init()
     my_uid = 0;
     frame_number = 0;
     inputs_this_frame.clear();
-    Levels::start_level(0);
-    playing_level_num = 0;
     playing_level = Levels::get_active_level();
 }
 
@@ -459,6 +456,8 @@ void GameStateLevel::uninit()
 {
     //Levels::destroy_level(playing_level);
     playing_level = nullptr;
+
+    Engine::instance->editing = false;
 }
 
 void GameStateLevel::read_input()
@@ -500,12 +499,27 @@ void GameStateLevel::read_input()
 void GameStateLevel::step(GameInput::UID focus_uid, float time_step)
 {
     GameState::step(focus_uid, time_step);
-    playing_level->step(inputs_this_frame, time_step);
+
+
+    if(Engine::instance->editing)
+    {
+        playing_level->editor.step(playing_level, time_step);
+    }
+    else
+    {
+        playing_level->step(inputs_this_frame, time_step);
+    }
+
 }
 
 void GameStateLevel::draw()
 {
     playing_level->draw();
+
+    if(Engine::instance->editing)
+    {
+        playing_level->editor.draw(playing_level);
+    }
 }
 
 void GameStateLevel::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
@@ -541,7 +555,7 @@ void GameStateLevel::serialize(Serialization::Stream *stream, GameInput::UID uid
 void GameStateLevel::draw_debug_ui()
 {
     playing_level->draw_debug_ui();
-    //playing_level->edit_draw();
+
 }
 #endif
 

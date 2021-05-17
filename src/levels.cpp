@@ -98,19 +98,13 @@ Level::Grid::Cell *Level::Grid::at(v2i pos)
     std::map<v2i, Cell *>::iterator it = cells_map.find(pos);
     if(it == cells_map.end())
     {
-        return nullptr;
+        cells_map[pos] = new Cell();
+        return cells_map[pos];
     }
     else
     {
         return it->second;
     }
-}
-
-void Level::Grid::set_filled(Level::v2i pos, bool fill)
-{
-    Cell *cell = cells_map[pos];
-    if(!cell) cells_map[pos] = new Cell();
-    cells_map[pos]->filled = fill;
 }
 
 v2 Level::Grid::cell_to_world(v2i pos)
@@ -133,6 +127,8 @@ void Level::Grid::serialize(Serialization::Stream *stream, bool writing)
     if(writing)
     {
         stream->write(world_scale);
+        stream->write(start_point.x);
+        stream->write(start_point.y);
         stream->write((int)cells_map.size());
         for(auto &pair : cells_map)
         {
@@ -142,12 +138,14 @@ void Level::Grid::serialize(Serialization::Stream *stream, bool writing)
             stream->write(pos.x);
             stream->write(pos.y);
             stream->write(cell->filled ? 1 : 0);
-            //stream->write(cell->win_when_touched);
+            stream->write(cell->win_when_touched ? 1 : 0);
         }
     }
     else
     {
         stream->read(&world_scale);
+        stream->read(&start_point.x);
+        stream->read(&start_point.y);
         int size;
         stream->read(&size);
         for(int i = 0; i < size; i++)
@@ -158,11 +156,11 @@ void Level::Grid::serialize(Serialization::Stream *stream, bool writing)
 
             int filled_val;
             stream->read(&filled_val);
-            //int win_when_touched;
-            //stream->read(&win_when_touched);
+            int win_when_touched;
+            stream->read(&win_when_touched);
 
             bool filled = filled_val == 0 ? false : true;
-            set_filled(pos, filled);
+            at(pos)->filled = filled;
         }
     }
 
@@ -176,7 +174,8 @@ void Level::Grid::serialize(Serialization::Stream *stream, bool writing)
 
 void Level::Avatar::reset(Level *level)
 {
-    position = v2(0, 4);
+    position = level->grid.cell_to_world(level->grid.start_point);
+
     grounded = false;
     horizontal_velocity = 0.0f;
     vertical_velocity = 0.0f;
@@ -346,6 +345,205 @@ void Level::Avatar::check_and_resolve_collisions(Level *level)
 
 
 
+void Level::Editor::step(Level *level, float time_step)
+{
+    int x;
+    int y;
+    Platform::Input::mouse_screen_position(&x, &y);
+    v2 mouse_pos = v2(x, y);
+
+    // Move camera
+    if(Platform::Input::mouse_button(1) && !ImGui::IsAnyWindowHovered())
+    {
+        v2 mouse_delta = mouse_pos - last_mouse_position;
+        mouse_delta.y *= -1.0f;
+        camera_position += -mouse_delta * 0.05f;
+    }
+    last_mouse_position = mouse_pos;
+    Graphics::Camera::position() = camera_position;
+
+    // Set start point
+    if(placing_start_point && !ImGui::IsAnyWindowHovered())
+    {
+        if(Platform::Input::mouse_button_down(0))
+        {
+            v2 pos = Platform::Input::mouse_world_position();
+            v2i grid_pos = level->grid.world_to_cell(pos);
+            level->grid.start_point = grid_pos;
+        }
+    }
+    Graphics::quad(level->grid.cell_to_world(level->grid.start_point), v2(1.0f, 1.0f), 0.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
+
+    // Place terrain
+    if(placing_terrain && !ImGui::IsAnyWindowHovered())
+    {
+        if(Platform::Input::mouse_button(0))
+        {
+            v2 pos = Platform::Input::mouse_world_position();
+            v2i grid_pos = level->grid.world_to_cell(pos);
+            level->grid.at(grid_pos)->filled = true;
+        }
+
+        if(Platform::Input::key(Platform::Input::Key::SHIFT) && Platform::Input::mouse_button(0))
+        {
+            v2 pos = Platform::Input::mouse_world_position();
+            v2i grid_pos = level->grid.world_to_cell(pos);
+            level->grid.at(grid_pos)->filled = false;
+        }
+    }
+
+    if(placing_win_points && !ImGui::IsAnyWindowHovered())
+    {
+        if(Platform::Input::mouse_button(0))
+        {
+            v2 pos = Platform::Input::mouse_world_position();
+            v2i grid_pos = level->grid.world_to_cell(pos);
+            level->grid.at(grid_pos)->win_when_touched = true;
+        }
+
+        if(Platform::Input::key(Platform::Input::Key::SHIFT) && Platform::Input::mouse_button(0))
+        {
+            v2 pos = Platform::Input::mouse_world_position();
+            v2i grid_pos = level->grid.world_to_cell(pos);
+            level->grid.at(grid_pos)->win_when_touched = false;
+        }
+    }
+
+
+    if(Platform::Input::key_down(Platform::Input::Key::ESC))
+    {
+        Game::exit_to_main_menu();
+    }
+}
+
+void Level::Editor::draw(Level *level)
+{
+    ImGui::Begin("Editor");
+
+    draw_file_menu(level);
+
+    if(ImGui::Button("Place terrain"))
+    {
+        placing_terrain = !placing_terrain;
+    }
+
+    const char* listbox_items[] = { "Start point", "Terrain", "Win points" };
+    static int listbox_item_current = 1;
+    ImGui::ListBox("Modes", &listbox_item_current, listbox_items, IM_ARRAYSIZE(listbox_items), 4);
+    for(int i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) modes[i] = false;
+    modes[listbox_item_current] = true;
+
+    ImGui::ShowDemoWindow();
+
+    ImGui::End();
+}
+
+void Level::Editor::draw_file_menu(Level *level)
+{
+    if(ImGui::Button("File"))
+    {
+        ImGui::OpenPopup("file_menu");
+    }
+    if(ImGui::BeginPopup("file_menu"))
+    {
+        ImGui::MenuItem(loaded_level, NULL, false, false);
+        if(ImGui::Button("New"))
+        {
+            ImGui::OpenPopup("confirmation");
+        }
+        if(ImGui::BeginPopup("confirmation"))
+        {
+            ImGui::Text("Are you sure?");
+            if(ImGui::MenuItem("Yes"))
+            {
+                level->init_default_level();
+            }
+            if(ImGui::MenuItem("No"))
+            {
+            }
+            ImGui::EndPopup();
+        }
+        bool popup_opened_this_step = false;
+        if(ImGui::Button("Open"))
+        {
+            ImGui::OpenPopup("open_level");
+            Platform::Memory::memset(text_input_buffer, 0, sizeof(text_input_buffer));
+            popup_opened_this_step = true;
+        }
+        static const char *LEVEL_PATH = "assets/data/levels/";
+        if(ImGui::BeginPopup("open_level"))
+        {
+            if(popup_opened_this_step) ImGui::SetKeyboardFocusHere(0);
+            if(ImGui::InputText("Level name", text_input_buffer,
+                        sizeof(text_input_buffer) - sizeof(LEVEL_PATH) - 1,
+                        ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                if(strlen(text_input_buffer) > 0)
+                {
+                    level->clear();
+                    strcpy(temp_input_buffer, LEVEL_PATH);
+                    strcat(temp_input_buffer, text_input_buffer);
+                    level->load_with_file(temp_input_buffer, true);
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::EndPopup();
+        }
+        /*
+        if(ImGui::BeginMenu("Open Recent"))
+        {
+            ImGui::MenuItem("fish_hat.c");
+            ImGui::MenuItem("fish_hat.inl");
+            ImGui::MenuItem("fish_hat.h");
+            if(ImGui::BeginMenu("More.."))
+            {
+                ImGui::MenuItem("Hello");
+                ImGui::MenuItem("Sailor");
+                if(ImGui::BeginMenu("Recurse.."))
+                {
+                    //ShowExampleMenuFile();
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenu();
+        }
+        */
+        /*
+        if(ImGui::Button("Save", "Ctrl+S"))
+        {
+        }
+        */
+        if(ImGui::Button("Save As.."))
+        {
+            ImGui::OpenPopup("save_level");
+            popup_opened_this_step = true;
+        }
+        if(ImGui::BeginPopup("save_level"))
+        {
+            if(popup_opened_this_step) ImGui::SetKeyboardFocusHere(0);
+            if(ImGui::InputText("Level name", text_input_buffer,
+                        sizeof(text_input_buffer) - sizeof(LEVEL_PATH) - 1,
+                        ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                if(strlen(text_input_buffer) > 0)
+                {
+                    strcpy(temp_input_buffer, LEVEL_PATH);
+                    strcat(temp_input_buffer, text_input_buffer);
+                    level->load_with_file(temp_input_buffer, false);
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::EndPopup();
+        }
+
+
+        ImGui::EndPopup();
+    }
+}
+
+
+
 void Level::step(GameInputList inputs, float time_step)
 {
     switch(current_mode)
@@ -358,44 +556,6 @@ void Level::step(GameInputList inputs, float time_step)
 
 }
 
-void Level::edit_step(float time_step)
-{
-    int x;
-    int y;
-    Platform::Input::mouse_screen_position(&x, &y);
-    v2 mouse_pos = v2(x, y);
-    if(Platform::Input::key(' '))
-    {
-        v2 mouse_delta = mouse_pos - edit_state.last_mouse_position;
-        mouse_delta.y *= -1.0f;
-        edit_state.camera_position += -mouse_delta * 0.05f;
-    }
-    edit_state.last_mouse_position = mouse_pos;
-
-    Graphics::Camera::position() = edit_state.camera_position;
-
-    if(Platform::Input::key('Q'))
-    {
-        v2 pos = Platform::Input::mouse_world_position();
-        v2i grid_pos = grid.world_to_cell(pos);
-        bool fill = !Platform::Input::key((int)Platform::Input::Key::SHIFT);
-        grid.set_filled(grid_pos, true);
-    }
-
-    if(Platform::Input::key('W'))
-    {
-        v2 pos = Platform::Input::mouse_world_position();
-        v2i grid_pos = grid.world_to_cell(pos);
-        bool fill = !Platform::Input::key((int)Platform::Input::Key::SHIFT);
-        grid.set_filled(grid_pos, false);
-    }
-
-    if(Platform::Input::key_down('M'))
-    {
-        Game::exit_to_main_menu();
-    }
-}
-
 void Level::draw()
 {
     switch(current_mode)
@@ -406,34 +566,6 @@ void Level::draw()
         case LOSS:    { loss_draw(); break; }
     }
 
-}
-
-void Level::edit_draw()
-{
-    general_draw();
-
-    ImGui::Begin("Editor");
-    static char load_buff[64] = "assets/data/levels/";
-    if(ImGui::InputText("Load level", load_buff, sizeof(load_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        load_with_file(load_buff, true);
-    }
-
-    static char save_buff[64] = "assets/data/levels/";
-    if(ImGui::InputText("Save level", save_buff, sizeof(save_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        load_with_file(save_buff, false);
-    }
-
-    static char level_0_buff[64] = "assets/data/levels/";
-    if(ImGui::InputText("Set level 0", level_0_buff, sizeof(level_0_buff) - 1, ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        // TODO: Temporary leak until the level table is formalized
-        char *file_path = new char[64];
-        strcpy(file_path, level_0_buff);
-        Levels::instance->level_files[0] = file_path;
-    }
-    ImGui::End();
 }
 
 void Level::serialize(Serialization::Stream *stream)
@@ -497,11 +629,20 @@ void Level::deserialize(Serialization::Stream *stream)
     grid.serialize(stream, false);
 }
 
-void Level::reset(int level_num)
+void Level::clear()
 {
+    number = -1;
+
     grid.init();
     grid.world_scale = 1.0f;
     grid.clear();
+
+    avatars.clear();
+}
+
+void Level::init(int level_num)
+{
+    clear();
 
     LevelsState::LevelFilesMap::iterator it = Levels::instance->level_files.find(level_num);
     if(it != Levels::instance->level_files.end())
@@ -513,26 +654,20 @@ void Level::reset(int level_num)
     else
     {
         Log::log_error("Could not find file associated with level %i", level_num);
-        reset_to_default_level();
-        number = 0;
+        init_default_level();
     }
 }
 
-void Level::reset_to_default_level()
+void Level::init_default_level()
 {
-    grid.init();
-    grid.world_scale = 1.0f;
-    grid.clear();
+    clear();
+
     for(v2i pos = {-10, 0}; pos.x <= 10; pos.x++)
     {
-        grid.set_filled(pos, true);
+        grid.at(pos)->filled = true;
     }
 
-    for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
-    {
-        Avatar *avatar = pair.second;
-        avatar->reset(this);
-    }
+    strcpy(editor.loaded_level, "(empty)");
 }
 
 void Level::change_mode(Mode new_mode)
@@ -646,7 +781,7 @@ void Level::playing_step(GameInputList inputs, float time_step)
     }
     if(Platform::Input::key_down('R'))
     {
-        reset_to_default_level();
+        init_default_level();
     }
 
 }
@@ -725,8 +860,7 @@ void Level::win_draw()
     {
         if(ImGui::Button("Next Level", button_size))
         {
-            reset(next_level_num);
-            change_mode(PLAYING);
+            Levels::start_level(next_level_num);
         }
     }
     if(ImGui::Button("Main Menu", button_size)) Game::exit_to_main_menu();
@@ -744,8 +878,7 @@ void Level::loss_draw()
     ImVec2 button_size = get_button_size();
     if(ImGui::Button("Restart", button_size))
     {
-        reset(0);
-        change_mode(PLAYING);
+        Levels::start_level(number);
     }
     if(ImGui::Button("Main Menu", button_size)) Game::exit_to_main_menu();
     if(ImGui::Button("Quit Game", button_size)) Game::stop();
@@ -808,10 +941,17 @@ void Level::load_with_file(const char *path, bool reading)
         {
             deserialize(stream);
             Serialization::free_stream(stream);
+
+            const char *name = strrchr(path, '/');
+            if(name != nullptr)
+            {
+                strcpy(editor.loaded_level, name + 1);
+            }
         }
         else
         {
-            reset_to_default_level();
+            init_default_level();
+            strcpy(editor.loaded_level, "(empty)");
         }
     }
     else
@@ -835,7 +975,7 @@ void Levels::init()
 Level *Levels::create_level(int level_num)
 {
     Level *new_level = new Level();
-    new_level->reset(level_num);
+    new_level->init(level_num);
     return new_level;
 }
 
@@ -847,7 +987,8 @@ void Levels::destroy_level(Level *level)
 
 void Levels::start_level(int level_num)
 {
-    instance->active_level->reset(level_num);
+    instance->active_level->init(level_num);
+    instance->active_level->current_mode = Level::PLAYING;
 }
 
 void Levels::show_level_select(bool show)

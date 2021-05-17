@@ -65,6 +65,7 @@ public:
         // How big is a grid cell in world space?
         float world_scale;
         std::map<v2i, Cell *, v2iComp> cells_map;
+        v2i start_point;
 
         void init();
         void clear();
@@ -94,11 +95,29 @@ public:
         void check_and_resolve_collisions(Level *level);
     };
 
-    struct EditState
+    struct Editor
     {
         GameMath::v2 camera_position = GameMath::v2();
-
         GameMath::v2 last_mouse_position = GameMath::v2();
+
+        char loaded_level[128];
+        char text_input_buffer[128];
+        char temp_input_buffer[128];
+
+        union
+        {
+            struct
+            {
+                bool placing_start_point;
+                bool placing_terrain;
+                bool placing_win_points;
+            };
+            bool modes[3];
+        };
+
+        void step(Level *level, float time_step);
+        void draw(Level *level);
+        void draw_file_menu(Level *level);
     };
 
     enum Mode
@@ -113,16 +132,15 @@ public:
     Grid grid;
     std::map<GameInput::UID, Avatar *> avatars;
     Mode current_mode;
-    EditState edit_state;
+    Editor editor;
 
+    void clear();
+    void init(int level_num);
+    void init_default_level();
     void step(GameInputList inputs, float time_step);
-    void edit_step(float time_step);
     void draw();
-    void edit_draw();
     void serialize(Serialization::Stream *stream);
     void deserialize(Serialization::Stream *stream);
-    void reset(int level_num);
-    void reset_to_default_level();
     void change_mode(Mode new_mode);
     void cleanup();
 
