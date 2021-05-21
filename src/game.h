@@ -21,7 +21,7 @@ struct GameInput
         NUM_ACTIONS
     };
 
-    bool current_actions[(int)Action::NUM_ACTIONS] ={};
+    bool current_actions[(int)Action::NUM_ACTIONS] = {};
     float current_horizontal_movement; // Value between -1 and 1
     GameMath::v2 current_aiming_direction;
 
@@ -42,8 +42,9 @@ struct GameState
         PLAYING_LEVEL
     };
 
+    Mode mode;
     unsigned int frame_number;
-    GameInput::UID my_uid;
+    GameInput::UID local_uid;
     GameInputList inputs_this_frame;
 
     virtual void init() = 0;
@@ -91,7 +92,6 @@ struct GameStateMenu : GameState
     static void menu_window_begin();
     static void menu_window_end();
     static ImVec2 button_size();
-
 };
 
 struct GameStateLobby: GameState
@@ -187,6 +187,7 @@ struct Engine
     GameState *current_game_state;
     GameState::Mode current_mode;
     GameState::Mode next_mode;
+
     bool editing = false;
 
 
@@ -208,22 +209,9 @@ struct Engine
     static void step_as_offline(GameState *game_state, float time_step);
     static void step_as_client(GameState *game_state, float time_step);
     static void step_as_server(GameState *game_state, float time_step);
+    static void draw_debug_menu();
 
     static void shutdown();
+
+    
 };
-
-
-
-
-
-
-struct Game
-{
-    static void start();
-    static void stop();
-
-    static GameInput::UID get_my_uid();
-
-    static void exit_to_main_menu();
-};
-

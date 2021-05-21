@@ -352,8 +352,12 @@ void Level::Editor::step(Level *level, float time_step)
     Platform::Input::mouse_screen_position(&x, &y);
     v2 mouse_pos = v2(x, y);
 
+    bool allow_placement = !ImGui::IsAnyItemHovered() && !ImGui::IsAnyItemFocused() && !ImGui::IsAnyItemActive()
+        && !Platform::Input::mouse_button_down(0); // For now, don't allow placement the first frame the mouse is down
+                                                   // so ImGui has time to update
+
     // Move camera
-    if(Platform::Input::mouse_button(1) && !ImGui::IsAnyWindowHovered())
+    if(Platform::Input::mouse_button(1))
     {
         v2 mouse_delta = mouse_pos - last_mouse_position;
         mouse_delta.y *= -1.0f;
@@ -363,7 +367,7 @@ void Level::Editor::step(Level *level, float time_step)
     Graphics::Camera::position() = camera_position;
 
     // Set start point
-    if(placing_start_point && !ImGui::IsAnyWindowHovered())
+    if(placing_start_point && allow_placement)
     {
         if(Platform::Input::mouse_button_down(0))
         {
@@ -375,7 +379,7 @@ void Level::Editor::step(Level *level, float time_step)
     Graphics::quad(level->grid.cell_to_world(level->grid.start_point), v2(1.0f, 1.0f), 0.0f, v4(0.0f, 1.0f, 0.0f, 1.0f));
 
     // Place terrain
-    if(placing_terrain && !ImGui::IsAnyWindowHovered())
+    if(placing_terrain && allow_placement)
     {
         if(Platform::Input::mouse_button(0))
         {
@@ -392,7 +396,7 @@ void Level::Editor::step(Level *level, float time_step)
         }
     }
 
-    if(placing_win_points && !ImGui::IsAnyWindowHovered())
+    if(placing_win_points && allow_placement)
     {
         if(Platform::Input::mouse_button(0))
         {
@@ -412,7 +416,7 @@ void Level::Editor::step(Level *level, float time_step)
 
     if(Platform::Input::key_down(Platform::Input::Key::ESC))
     {
-        Game::exit_to_main_menu();
+        Engine::switch_game_state(GameState::MAIN_MENU);
     }
 }
 
@@ -556,14 +560,14 @@ void Level::step(GameInputList inputs, float time_step)
 
 }
 
-void Level::draw()
+void Level::draw(GameInput::UID local_uid)
 {
     switch(current_mode)
     {
-        case PLAYING: { playing_draw(); break; }
-        case PAUSED:  { paused_draw(); break; }
-        case WIN:     { win_draw(); break; }
-        case LOSS:    { loss_draw(); break; }
+        case PLAYING: { playing_draw(local_uid); break; }
+        case PAUSED:  { paused_draw(local_uid); break; }
+        case WIN:     { win_draw(local_uid); break; }
+        case LOSS:    { loss_draw(local_uid); break; }
     }
 
 }
@@ -626,6 +630,11 @@ void Level::deserialize(Serialization::Stream *stream)
         uids_to_remove.pop_back();
     }
 
+    // TODO:
+    // Here, we clear the map each time we need to serialize because we only set filled blocks,
+    // without clearing ones that aren't set in the stream
+    // This should be made to work as a diff fix thingy
+    grid.clear();
     grid.serialize(stream, false);
 }
 
@@ -668,6 +677,10 @@ void Level::init_default_level()
     }
 
     strcpy(editor.loaded_level, "(empty)");
+}
+
+void Level::uninit()
+{
 }
 
 void Level::change_mode(Mode new_mode)
@@ -799,9 +812,9 @@ void Level::loss_step(GameInputList inputs, float time_step)
 {
 }
 
-void Level::playing_draw()
+void Level::playing_draw(GameInput::UID local_uid)
 {
-    general_draw();
+    general_draw(local_uid);
 }
 
 static void begin_base_menu()
@@ -835,21 +848,22 @@ static ImVec2 get_button_size()
     return button_size;
 }
 
-void Level::paused_draw()
+void Level::paused_draw(GameInput::UID local_uid)
 {
-    general_draw();
+    general_draw(local_uid);
 
     // Draw pause menu UI
     ImGui::Begin("Pause Window");
     if(ImGui::Button("Resume"))    change_mode(PLAYING);
-    if(ImGui::Button("Main Menu")) Game::exit_to_main_menu();
-    if(ImGui::Button("Quit Game")) Game::stop();
+    if(ImGui::Button("Lobby"))     Engine::switch_game_state(GameState::LOBBY);
+    if(ImGui::Button("Main Menu")) Engine::switch_game_state(GameState::MAIN_MENU);
+    if(ImGui::Button("Quit Game")) Engine::stop();
     ImGui::End();
 }
 
-void Level::win_draw()
+void Level::win_draw(GameInput::UID local_uid)
 {
-    general_draw();
+    general_draw(local_uid);
 
     begin_base_menu();
 
@@ -863,15 +877,15 @@ void Level::win_draw()
             Levels::start_level(next_level_num);
         }
     }
-    if(ImGui::Button("Main Menu", button_size)) Game::exit_to_main_menu();
-    if(ImGui::Button("Quit Game", button_size)) Game::stop();
+    if(ImGui::Button("Main Menu", button_size)) Engine::switch_game_state(GameState::MAIN_MENU);
+    if(ImGui::Button("Quit Game", button_size)) Engine::stop();
 
     end_base_menu();
 }
 
-void Level::loss_draw()
+void Level::loss_draw(GameInput::UID local_uid)
 {
-    general_draw();
+    general_draw(local_uid);
 
     begin_base_menu();
 
@@ -880,18 +894,17 @@ void Level::loss_draw()
     {
         Levels::start_level(number);
     }
-    if(ImGui::Button("Main Menu", button_size)) Game::exit_to_main_menu();
-    if(ImGui::Button("Quit Game", button_size)) Game::stop();
+    if(ImGui::Button("Main Menu", button_size)) Engine::switch_game_state(GameState::MAIN_MENU);
+    if(ImGui::Button("Quit Game", button_size)) Engine::stop();
 
     end_base_menu();
 }
 
-void Level::general_draw()
+void Level::general_draw(GameInput::UID local_uid)
 {
     v2 camera_offset = v2(16.0f, 4.0f);
 
-    GameInput::UID my_uid = Game::get_my_uid();
-    auto focus_avatar_it = avatars.find(my_uid);
+    auto focus_avatar_it = avatars.find(local_uid);
     if(focus_avatar_it != avatars.end())
     {
         Avatar *focus_avatar = focus_avatar_it->second;
@@ -985,20 +998,17 @@ void Levels::destroy_level(Level *level)
     delete level;
 }
 
-void Levels::start_level(int level_num)
-{
-    instance->active_level->init(level_num);
-    instance->active_level->current_mode = Level::PLAYING;
-}
-
-void Levels::show_level_select(bool show)
-{
-    instance->lobby_level_selecting = show;
-}
-
-Level *Levels::get_active_level()
+Level *Levels::active_level()
 {
     return instance->active_level;
 }
 
+Level *Levels::start_level(int level_number)
+{
+    instance->active_level->uninit();
+    delete instance->active_level;
 
+    instance->active_level = new Level();
+    instance->active_level->init(level_number);
+    return instance->active_level;
+}

@@ -17,10 +17,8 @@ struct Levels
     static struct Level *create_level(int level_num);
     static void destroy_level(Level *level);
 
-    static void start_level(int level);
-    static void show_level_select(bool show);
-
-    static struct Level *get_active_level();
+    static Level *active_level();
+    static Level *start_level(int level_number);
 };
 
 
@@ -70,7 +68,6 @@ public:
         void init();
         void clear();
         Cell *at(Level::v2i pos);
-        void set_filled(Level::v2i pos, bool fill);
         GameMath::v2 cell_to_world(v2i pos);
         v2i world_to_cell(GameMath::v2 pos);
         void serialize(Serialization::Stream *stream, bool writing = true);
@@ -137,8 +134,9 @@ public:
     void clear();
     void init(int level_num);
     void init_default_level();
+    void uninit();
     void step(GameInputList inputs, float time_step);
-    void draw();
+    void draw(GameInput::UID local_uid);
     void serialize(Serialization::Stream *stream);
     void deserialize(Serialization::Stream *stream);
     void change_mode(Mode new_mode);
@@ -161,11 +159,11 @@ private:
     void win_step(GameInputList inputs, float time_step);
     void loss_step(GameInputList inputs, float time_step);
 
-    void playing_draw();
-    void paused_draw();
-    void win_draw();
-    void loss_draw();
-    void general_draw();
+    void playing_draw(GameInput::UID local_uid);
+    void paused_draw(GameInput::UID local_uid);
+    void win_draw(GameInput::UID local_uid);
+    void loss_draw(GameInput::UID local_uid);
+    void general_draw(GameInput::UID local_uid);
 
     void load_with_file(const char *path, bool reading);
 };

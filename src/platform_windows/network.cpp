@@ -278,6 +278,8 @@ std::vector<Network::Connection *> Network::accept_client_connections()
 
 void Network::Connection::send_stream(Serialization::Stream *stream)
 {
+    assert(stream->size() > 0);
+
     // Send data over TCP
     char *stream_data = stream->data();
     int bytes = stream->size();
