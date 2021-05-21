@@ -557,7 +557,6 @@ void Level::step(GameInputList inputs, float time_step)
         case WIN:     { win_step(inputs, time_step); break; }
         case LOSS:    { loss_step(inputs, time_step); break; }
     }
-
 }
 
 void Level::draw(GameInput::UID local_uid)

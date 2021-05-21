@@ -73,6 +73,13 @@ void GameInput::read_from_local(v2 avatar_pos)
     h += Platform::Input::key('D') ? 1.0f : 0.0f;
     current_horizontal_movement = h;
 
+    if(GameMath::abs(current_horizontal_movement) > 1000.0f)
+    {
+        int b = 0;
+        b++;
+        GameConsole::write("Huge horizontal movement");
+    }
+
     // TODO: This is spooky
     //v2 avatar_pos = Engine::instance->current_game_state->playing_level->get_avatar_position(uid);
     current_aiming_direction = Platform::Input::mouse_world_position() - avatar_pos;
@@ -99,7 +106,12 @@ bool GameInput::read_from_connection(Network::Connection **connection)
         // TODO: Sanitize ...
 
         serialize(input_stream, false);
+        assert(GameMath::abs(current_horizontal_movement) < 1.5f);
         return true;
+    }
+    else
+    {
+        // Leave as defaults;
     }
 
     Serialization::free_stream(input_stream);
@@ -125,9 +137,8 @@ void GameState::read_input()
 {
 }
 
-void GameState::step(GameInput::UID focus_uid, float time_step)
+void GameState::step(float time_step)
 {
-    local_uid = focus_uid;
     frame_number++;
 }
 
@@ -166,9 +177,9 @@ void GameStateMenu::read_input()
 {
 }
 
-void GameStateMenu::step(GameInput::UID focus_uid, float time_step)
+void GameStateMenu::step(float time_step)
 {
-    GameState::step(focus_uid, time_step);
+    GameState::step(time_step);
 }
 
 void GameStateMenu::draw()
@@ -336,7 +347,7 @@ void GameStateLobby::uninit()
     level = nullptr;
 }
 
-void GameStateLobby::read_input()
+void GameState::read_input_for_level(Level *level)
 {
     inputs_this_frame.clear();
 
@@ -344,11 +355,11 @@ void GameStateLobby::read_input()
     GameInput local_input;
     // If we're a client, this field doesn't matter since we're sending
     // an input list to the server, it will just discard the uid
-    local_input.uid = 0;
+    local_input.uid = local_uid;
     v2 avatar_pos = v2();
-    if(!level->avatars.empty() && level->avatars[0] != nullptr)
+    if(!level->avatars.empty() && level->avatars[local_uid] != nullptr)
     {
-        avatar_pos = level->avatars[0]->position;
+        avatar_pos = level->avatars[local_uid]->position;
     }
     local_input.read_from_local(avatar_pos);
     inputs_this_frame.push_back(local_input);
@@ -360,8 +371,8 @@ void GameStateLobby::read_input()
         for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
         {
             GameInput remote_input;
-            remote_input.uid = client.uid;
             remote_input.read_from_connection(&(client.connection));
+            remote_input.uid = client.uid;
             if(client.connection != nullptr)
             {
                 inputs_this_frame.push_back(remote_input);
@@ -372,9 +383,14 @@ void GameStateLobby::read_input()
     }
 }
 
-void GameStateLobby::step(GameInput::UID focus_uid, float time_step)
+void GameStateLobby::read_input()
 {
-    GameState::step(focus_uid, time_step);
+    read_input_for_level(level);
+}
+
+void GameStateLobby::step(float time_step)
+{
+    GameState::step(time_step);
     level->step(inputs_this_frame, time_step);
 }
 
@@ -409,11 +425,11 @@ void GameStateLobby::draw()
     }
 }
 
-void GameStateLobby::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
+void GameStateLobby::serialize(Serialization::Stream *stream, GameInput::UID uid_for_client, bool serialize)
 {
     if(serialize)
     {
-        stream->write(uid);
+        stream->write(uid_for_client);
         stream->write(frame_number);
         stream->write((int)inputs_this_frame.size());
         for(GameInput &input : inputs_this_frame)
@@ -468,46 +484,12 @@ void GameStateLevel::uninit()
 
 void GameStateLevel::read_input()
 {
-    inputs_this_frame.clear();
-
-    // Read input from local player
-    GameInput local_input;
-    local_input.uid = 0;
-    v2 avatar_pos = v2();
-    if(!playing_level->avatars.empty() && playing_level->avatars[0] != nullptr)
-    {
-        avatar_pos = playing_level->avatars[0]->position;
-    }
-    local_input.read_from_local(avatar_pos);
-    inputs_this_frame.push_back(local_input);
-
-
-
-    if(Engine::instance->network_mode == Engine::NetworkMode::SERVER)
-    {
-        // If we're a server, read inputs from all clients
-        if(Engine::instance->network_mode == Engine::NetworkMode::SERVER)
-        {
-            // Read remote player's input
-            for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
-            {
-                GameInput remote_input;
-                remote_input.uid = client.uid;
-                remote_input.read_from_connection(&(client.connection));
-                if(client.connection != nullptr)
-                {
-                    inputs_this_frame.push_back(remote_input);
-                }
-            }
-            // Clean out disconnected connections
-            Engine::instance->server.remove_disconnected_clients();
-        }
-    }
+    read_input_for_level(playing_level);
 }
 
-void GameStateLevel::step(GameInput::UID focus_uid, float time_step)
+void GameStateLevel::step(float time_step)
 {
-    GameState::step(focus_uid, time_step);
+    GameState::step(time_step);
 
 
     if(Engine::instance->editing)
@@ -745,7 +727,7 @@ void Engine::step_as_offline(GameState *game_state, float time_step)
     Platform::Input::read_input();
     game_state->read_input();
 
-    game_state->step(0, time_step);
+    game_state->step(time_step);
 
     // Do drawing
     {
@@ -812,8 +794,7 @@ void Engine::step_as_client(GameState *game_state, float time_step)
     }
     else
     {
-        unsigned int focus = 0;
-        game_state->step(focus, time_step);
+        game_state->step(time_step);
     }
 
     if(game_state_valid)
@@ -827,6 +808,7 @@ void Engine::step_as_client(GameState *game_state, float time_step)
 
             GameInput local_input;
             local_input.read_from_local(v2()); // TODO: Fix this!
+            assert(GameMath::abs(local_input.current_horizontal_movement) < 1.5f);
             local_input.serialize(input_stream, true);
 
             Engine::instance->client.server_connection->send_stream(input_stream);
@@ -877,7 +859,7 @@ void Engine::step_as_server(GameState *game_state, float time_step)
     game_state->read_input();
 
     // Step the game state using all inputs
-    game_state->step(0, time_step);
+    game_state->step(time_step);
 
     // Broadcast the players and game state
     {

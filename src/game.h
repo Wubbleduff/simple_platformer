@@ -12,7 +12,7 @@
 struct GameInput
 {
     typedef unsigned int UID;
-    UID uid;
+    UID uid = -1;
     enum class Action
     {
         JUMP,
@@ -22,8 +22,8 @@ struct GameInput
     };
 
     bool current_actions[(int)Action::NUM_ACTIONS] = {};
-    float current_horizontal_movement; // Value between -1 and 1
-    GameMath::v2 current_aiming_direction;
+    float current_horizontal_movement = 0.0f; // Value between -1 and 1
+    GameMath::v2 current_aiming_direction = GameMath::v2();
 
     bool action(Action action);
 
@@ -51,12 +51,14 @@ struct GameState
     virtual void uninit();
 
     virtual void read_input();
-    virtual void step(GameInput::UID focus_uid, float time_step);
+    virtual void step(float time_step);
     virtual void draw();
     virtual void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
 #if DEBUG
     virtual void draw_debug_ui();
 #endif
+
+    void read_input_for_level(struct Level *level); // TODO: Fix this
 };
 
 struct GameStateMenu : GameState
@@ -78,7 +80,7 @@ struct GameStateMenu : GameState
     void init();
     void uninit();
     void read_input();
-    void step(GameInput::UID focus_uid, float time_step);
+    void step(float time_step);
     void draw();
     void draw_main_menu();
     void draw_join_player();
@@ -101,7 +103,7 @@ struct GameStateLobby: GameState
     void init();
     void uninit();
     void read_input();
-    void step(GameInput::UID focus_uid, float time_step);
+    void step(float time_step);
     void draw();
     void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
 #if DEBUG
@@ -116,7 +118,7 @@ struct GameStateLevel : GameState
     void init();
     void uninit();
     void read_input();
-    void step(GameInput::UID focus_uid, float time_step);
+    void step(float time_step);
     void draw();
     void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
 #if DEBUG
