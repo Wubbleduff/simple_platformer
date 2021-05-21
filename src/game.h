@@ -3,15 +3,17 @@
 
 #include "network.h"
 #include "game_math.h"
+#include "levels.h"
 #include "imgui.h"
 #include <vector>
 #include <array>
+#include <map>
 
 
 
+/*
 struct GameInput
 {
-    typedef unsigned int UID;
     UID uid;
     enum class Action
     {
@@ -31,7 +33,65 @@ struct GameInput
     bool read_from_connection(Network::Connection **connection);
     void serialize(Serialization::Stream *stream, bool serialize);
 };
-typedef std::vector<GameInput> GameInputList;
+*/
+
+typedef unsigned int UID;
+struct MenuInput
+{
+    GameMath::v2 mouse_position;
+    bool mouse_down;
+    bool select;
+    bool direction_input[4];
+
+    void read_from_local();
+    //bool read_from_connection(Network::Connection **connection); // Does this need to be serialized?
+    void serialize(Serialization::Stream *stream, bool serialize);
+};
+struct AvatarInput
+{
+    UID uid;
+    float horizontal_movement;
+    bool jump;
+    GameMath::v2 aiming_direction;
+    bool shoot;
+
+    void read_from_local(struct Avatar *avatar);
+    bool read_from_connection(Network::Connection **connection);
+    void serialize(Serialization::Stream *stream, bool serialize);
+};
+typedef std::vector<AvatarInput> AvatarInputList;
+
+struct Avatar
+{
+    GameMath::v2 position;
+    GameMath::v4 color;
+    bool grounded;
+    float horizontal_velocity;
+    float vertical_velocity;
+    float run_strength;
+    float friction_strength;
+    float mass;
+    float gravity;
+    float full_extent;
+
+    void reset(struct Level *level);
+    void step(AvatarInput *input, struct Level *level, float time_step);
+    void draw();
+    void check_and_resolve_collisions(struct Level *level);
+};
+
+struct AvatarList
+{
+    std::map<UID, Avatar *> avatar_map;
+
+    Avatar *add(UID uid, Level *level);
+    Avatar *find(UID uid);
+    void remove(UID uid);
+    void sync_with_inputs(AvatarInputList inputs, Level *level);
+
+    void step(AvatarInputList inputs, struct Level *level, float time_step);
+    void draw();
+};
 
 struct GameState
 {
@@ -39,20 +99,18 @@ struct GameState
     {
         MAIN_MENU,
         LOBBY,
-        PLAYING_LEVEL
-    };
-
-    unsigned int frame_number;
-    GameInput::UID my_uid;
-    GameInputList inputs_this_frame;
+        PLAYING_LEVEL,
+        EDITOR,
+    } mode;
 
     virtual void init() = 0;
     virtual void uninit();
 
     virtual void read_input();
-    virtual void step(GameInput::UID focus_uid, float time_step);
+    virtual void step(UID focus_uid, float time_step);
     virtual void draw();
-    virtual void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
+    virtual void serialize(Serialization::Stream *stream, UID uid, bool serialize);
+    virtual void serialize_input(Serialization::Stream *stream); // For clients to send to servers
 #if DEBUG
     virtual void draw_debug_ui();
 #endif
@@ -60,6 +118,11 @@ struct GameState
 
 struct GameStateMenu : GameState
 {
+    struct Input
+    {
+        MenuInput menu_input;
+    } input;
+
     enum Screen
     {
         MAIN_MENU,
@@ -77,16 +140,17 @@ struct GameStateMenu : GameState
     void init();
     void uninit();
     void read_input();
-    void step(GameInput::UID focus_uid, float time_step);
+    void step(UID focus_uid, float time_step);
     void draw();
-    void draw_main_menu();
-    void draw_join_player();
-    void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
+    void serialize(Serialization::Stream *stream, UID uid, bool serialize);
+    void serialize_input(Serialization::Stream *stream);
 #if DEBUG
     void draw_debug_ui();
 #endif
 
     void change_menu(Screen screen);
+    void draw_main_menu();
+    void draw_join_player();
 
     static void menu_window_begin();
     static void menu_window_end();
@@ -96,14 +160,24 @@ struct GameStateMenu : GameState
 
 struct GameStateLobby: GameState
 {
+    struct Input
+    {
+        MenuInput menu_input;
+        AvatarInputList avatar_inputs;
+    } input;
+
+    int frame_number;
+    UID local_uid;
+    AvatarList avatars;
     struct Level *level;
 
     void init();
     void uninit();
     void read_input();
-    void step(GameInput::UID focus_uid, float time_step);
+    void step(UID focus_uid, float time_step);
     void draw();
-    void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
+    void serialize(Serialization::Stream *stream, UID uid, bool serialize);
+    void serialize_input(Serialization::Stream *stream);
 #if DEBUG
     void draw_debug_ui();
 #endif
@@ -111,14 +185,24 @@ struct GameStateLobby: GameState
 
 struct GameStateLevel : GameState
 {
-    struct Level *playing_level;
+    struct Input
+    {
+        MenuInput menu_input; // For pause menu
+        AvatarInputList avatar_inputs;
+    } input;
 
+    int frame_number;
+    UID local_uid;
+    AvatarList avatars;
+    struct Level *level;
+    
     void init();
     void uninit();
     void read_input();
-    void step(GameInput::UID focus_uid, float time_step);
+    void step(UID focus_uid, float time_step);
     void draw();
-    void serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize);
+    void serialize(Serialization::Stream *stream, UID uid, bool serialize);
+    void serialize_input(Serialization::Stream *stream);
 #if DEBUG
     void draw_debug_ui();
 #endif
@@ -172,11 +256,11 @@ struct Engine
     {
         struct ClientConnection
         {
-            GameInput::UID uid = 0;
+            UID uid = 0;
             Network::Connection *connection = nullptr;
         };
         std::vector<ClientConnection> client_connections;
-        GameInput::UID next_input_uid = 1;
+        UID next_input_uid = 1;
 
         bool startup(int port);
         void shutdown();
@@ -188,6 +272,7 @@ struct Engine
     GameState::Mode current_mode;
     GameState::Mode next_mode;
     bool editing = false;
+    int level_to_load = 0;
 
 
 
@@ -195,7 +280,9 @@ struct Engine
     static void stop();
     static void init();
 
-    static void switch_game_state(GameState::Mode mode);
+    static void switch_game_mode(GameState::Mode mode);
+
+    static void exit_to_main_menu();
 
     // Switches to client mode and connects to a server
     static void connect(const char *ip_address, int port);
@@ -212,18 +299,4 @@ struct Engine
     static void shutdown();
 };
 
-
-
-
-
-
-struct Game
-{
-    static void start();
-    static void stop();
-
-    static GameInput::UID get_my_uid();
-
-    static void exit_to_main_menu();
-};
 

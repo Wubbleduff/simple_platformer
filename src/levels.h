@@ -16,32 +16,28 @@ struct Levels
     static void init();
     static struct Level *create_level(int level_num);
     static void destroy_level(Level *level);
-
-    static void start_level(int level);
-    static void show_level_select(bool show);
-
-    static struct Level *get_active_level();
 };
 
+struct v2i
+{
+    union
+    {
+        struct { int x, y; };
+        int v[2];
+    };
+
+    v2i() {}
+    v2i(int a, int b): x(a), y(b) {}
+
+    v2i operator+(v2i b) { return v2i(x + b.x, y + b.y); }
+    v2i operator-(v2i b) { return v2i(x - b.x, y - b.y); }
+    bool operator==(v2i b) { return (this->x == b.x) && (this->y == b.y); }
+};
 
 struct Level
 {
 public:
-    struct v2i
-    {
-        union
-        {
-            struct { int x, y; };
-            int v[2];
-        };
-
-        v2i() {}
-        v2i(int a, int b) : x(a), y(b) {}
-
-        v2i operator+(v2i b) { return v2i(x + b.x, y + b.y); }
-        v2i operator-(v2i b) { return v2i(x - b.x, y - b.y); }
-        bool operator==(v2i b) { return (this->x == b.x) && (this->y == b.y); }
-    };
+    
 
     struct Grid
     {
@@ -65,34 +61,15 @@ public:
         // How big is a grid cell in world space?
         float world_scale;
         std::map<v2i, Cell *, v2iComp> cells_map;
-        v2i start_point;
+        v2i start_cell;
 
         void init();
         void clear();
-        Cell *at(Level::v2i pos);
-        void set_filled(Level::v2i pos, bool fill);
+        Cell *at(v2i pos);
+        void set_filled(v2i pos, bool fill);
         GameMath::v2 cell_to_world(v2i pos);
         v2i world_to_cell(GameMath::v2 pos);
         void serialize(Serialization::Stream *stream, bool writing = true);
-    };
-
-    struct Avatar
-    {
-        GameMath::v2 position;
-        GameMath::v4 color;
-        bool grounded;
-        float horizontal_velocity;
-        float vertical_velocity;
-        float run_strength;
-        float friction_strength;
-        float mass;
-        float gravity;
-        float full_extent;
-
-        void reset(Level *level);
-        void step(GameInput *input, Level *level, float time_step);
-        void draw();
-        void check_and_resolve_collisions(Level *level);
     };
 
     struct Editor
@@ -120,54 +97,22 @@ public:
         void draw_file_menu(Level *level);
     };
 
-    enum Mode
-    {
-        PLAYING,
-        PAUSED,
-        WIN,
-        LOSS
-    };
-
     int number;
     Grid grid;
-    std::map<GameInput::UID, Avatar *> avatars;
-    Mode current_mode;
     Editor editor;
 
-    void clear();
+    
     void init(int level_num);
     void init_default_level();
-    void step(GameInputList inputs, float time_step);
+    void uninit();
+    void clear();
+    void step(float time_step);
     void draw();
-    void serialize(Serialization::Stream *stream);
-    void deserialize(Serialization::Stream *stream);
-    void change_mode(Mode new_mode);
-    void cleanup();
-
-    GameMath::v2 get_avatar_position(GameInput::UID id);
-
-#if DEBUG
-    void draw_debug_ui();
-#endif
+    void serialize(Serialization::Stream *stream, bool writing);
 
 
 private:
-    Avatar *Level::add_avatar(GameInput::UID id);
-    void remove_avatar(GameInput::UID id);
-    GameInput *get_input(GameInputList *inputs, GameInput::UID uid);
-
-    void playing_step(GameInputList inputs, float time_step);
-    void paused_step(GameInputList inputs, float time_step);
-    void win_step(GameInputList inputs, float time_step);
-    void loss_step(GameInputList inputs, float time_step);
-
-    void playing_draw();
-    void paused_draw();
-    void win_draw();
-    void loss_draw();
-    void general_draw();
-
-    void load_with_file(const char *path, bool reading);
+    void load_with_file(const char *path, bool writing);
 };
 
 

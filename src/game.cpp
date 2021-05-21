@@ -30,55 +30,59 @@ const float Engine::Client::TIMEOUT = 4.0f;
 
 
 
-bool GameInput::action(Action action)
+#if 1
+
+void MenuInput::read_from_local()
 {
-    return current_actions[(int)action];
 }
 
-void GameInput::serialize(Serialization::Stream *stream, bool serialize)
+void MenuInput::serialize(Serialization::Stream *stream, bool serialize)
+{
+}
+
+void AvatarInput::serialize(Serialization::Stream *stream, bool serialize)
 {
     if(serialize)
     {
-        for(int i = 0; i < (int)Action::NUM_ACTIONS; i++)
-        {
-            stream->write((int)current_actions[i]);
-        }
-
-        stream->write(current_horizontal_movement);
-        stream->write(current_aiming_direction);
+        stream->write(uid);
+        stream->write(horizontal_movement);
+        stream->write(jump == false ? 0 : 1);
+        stream->write(aiming_direction);
+        stream->write(shoot == false ? 0 : 1);
     }
     else
     {
-        for(int i = 0; i < (int)Action::NUM_ACTIONS; i++)
-        {
-            int value;
-            stream->read(&value);
-            current_actions[i] = (value == 0) ? false : true;
-        }
-
-        stream->read(&current_horizontal_movement);
-        stream->read(&current_aiming_direction);
+        stream->read(&uid);
+        stream->read(&horizontal_movement);
+        stream->read((int *)&jump);
+        stream->read(&aiming_direction);
+        stream->read((int *)&shoot);
     }
     
 }
 
 // TODO: Should I pass current_game_state here?
-void GameInput::read_from_local(v2 avatar_pos)
+void AvatarInput::read_from_local(Avatar *avatar)
 {
-    current_actions[(int)Action::JUMP] = Platform::Input::key_down(' ');
-    current_actions[(int)Action::SHOOT] = Platform::Input::mouse_button_down(0);
+    jump = Platform::Input::key_down(' ');
+    shoot = Platform::Input::mouse_button_down(0);
 
     float h = 0.0f;
     h -= Platform::Input::key('A') ? 1.0f : 0.0f;
     h += Platform::Input::key('D') ? 1.0f : 0.0f;
-    current_horizontal_movement = h;
+    horizontal_movement = h;
 
-    // TODO: This is spooky
-    //v2 avatar_pos = Engine::instance->current_game_state->playing_level->get_avatar_position(uid);
-    current_aiming_direction = Platform::Input::mouse_world_position() - avatar_pos;
+    if(avatar)
+    {
+        aiming_direction = Platform::Input::mouse_world_position() - avatar->position;
+    }
+    else
+    {
+        aiming_direction = v2();
+    }   
 }
 
-bool GameInput::read_from_connection(Network::Connection **connection)
+bool AvatarInput::read_from_connection(Network::Connection **connection)
 {
     assert(*connection != nullptr);
 
@@ -106,50 +110,379 @@ bool GameInput::read_from_connection(Network::Connection **connection)
 
     return false;
 }
+#endif
 
 
 
-
-void GameState::init()
+Avatar *AvatarList::add(UID uid, Level *level)
 {
-    my_uid = 0;
-    frame_number = 0;
-    inputs_this_frame.clear();
+    std::map<UID, Avatar *>::iterator it = avatar_map.find(uid);
+    assert(it == avatar_map.end());
+
+    Avatar *avatar = new Avatar();
+    avatar_map[uid] = avatar;
+
+    avatar->reset(level);
+
+    return avatar;
 }
 
-void GameState::uninit()
+Avatar *AvatarList::find(UID uid)
 {
+    std::map<UID, Avatar *>::iterator it = avatar_map.find(uid);
+    if(it == avatar_map.end())
+    {
+        return nullptr;
+    }
+    return it->second;
 }
 
-void GameState::read_input()
+void AvatarList::remove(UID uid)
 {
+    avatar_map.erase(uid);
 }
 
-void GameState::step(GameInput::UID focus_uid, float time_step)
+void AvatarList::sync_with_inputs(AvatarInputList inputs, Level *level)
 {
-    my_uid = focus_uid;
-    frame_number++;
+    // Sync and match avatars to inputs
+    // Each input should map to one avatar to control
+    // TODO: This should be done differently
+    for(AvatarInput &input : inputs)
+    {
+        auto it = avatar_map.find(input.uid);
+        if(it == avatar_map.end())
+        {
+            add(input.uid, level);
+        }
+    }
+    std::vector<UID> uids_to_remove;
+    for(const std::pair<UID, Avatar *> &pair : avatar_map)
+    {
+        auto it = std::find_if(inputs.begin(), inputs.end(),
+            [&](const AvatarInput &input) { return input.uid == pair.first; });
+        if(it == inputs.end())
+        {
+            uids_to_remove.push_back(pair.first);
+        }
+    }
+    while(uids_to_remove.size() > 0)
+    {
+        remove(uids_to_remove.back());
+        uids_to_remove.pop_back();
+    }
 }
 
-void GameState::draw()
+void AvatarList::step(AvatarInputList inputs, Level *level, float time_step)
 {
+    sync_with_inputs(inputs, level);
+
+    for(AvatarInput &input : inputs)
+    {
+        Avatar *avatar = find(input.uid);
+        avatar->step(&input, level, time_step);
+    }
 }
 
-void GameState::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
+void AvatarList::draw()
 {
+    for(std::pair<UID, Avatar *> pair : avatar_map)
+    {
+        Avatar *avatar = pair.second;
+        avatar->draw();
+    }
 }
 
+#pragma region Avatar
+
+void Avatar::reset(Level *level)
+{
+    position = level->grid.cell_to_world(level->grid.start_cell);
+
+    grounded = false;
+    horizontal_velocity = 0.0f;
+    vertical_velocity = 0.0f;
+    run_strength = 256.0f;
+    friction_strength = 16.0f;
+    mass = 4.0f;
+    gravity = 9.81f;
+    full_extent = 1.0f;
+    color = random_color();
+}
+
+void Avatar::step(AvatarInput *input, Level *level, float time_step)
+{
+    float horizontal_acceleration = 0.0f;
+    float vertical_acceleration = 0.0f;
+
+    bool jump = input->jump;
+    bool shoot = input->shoot;
+
+    horizontal_acceleration += input->horizontal_movement * run_strength;
+
+    if(grounded)
+    {
+        vertical_velocity = 0.0f;
+
+        if(jump)
+        {
+            vertical_velocity = 20.0f;
+            grounded = false;
+        }
+    }
+    else
+    {
+        //vertical_acceleration -= gravity * mass;
+    }
+
+    if(shoot)
+    {
+        Log::log_info("Bang!");
+    }
+
+    vertical_acceleration -= gravity * mass;
+    horizontal_acceleration -= horizontal_velocity * friction_strength;
+
+    horizontal_velocity += horizontal_acceleration * time_step;
+    vertical_velocity += vertical_acceleration * time_step;
+    position.x += horizontal_velocity * time_step;
+    position.y += vertical_velocity * time_step;
+
+    check_and_resolve_collisions(level);
+
+    if(position.y < -5.0f)
+    {
+        //level->change_mode(LOSS);
+    }
+}
+
+void Avatar::draw()
+{
+    Graphics::quad(position, v2(1.0f, 1.0f) * full_extent, 0.0f, color);
+}
+
+static bool aabb(v2 a_bl, v2 a_tr, v2 b_bl, v2 b_tr, v2 *dir, float *depth)
+{
+    float a_left   = a_bl.x;
+    float a_right  = a_tr.x;
+    float a_top    = a_tr.y;
+    float a_bottom = a_bl.y;
+
+    float b_left   = b_bl.x;
+    float b_right  = b_tr.x;
+    float b_top    = b_tr.y;
+    float b_bottom = b_bl.y;
+
+    float left_diff   = a_left - b_right;
+    float right_diff  = b_left - a_right;
+    float top_diff    = b_bottom - a_top;
+    float bottom_diff = a_bottom - b_top;
+
+    float max_depth = max(left_diff, max(right_diff, max(top_diff, bottom_diff)));
+
+    if(max_depth > 0.0f)
+    {
+        return false;
+    }
+
+    if(max_depth == left_diff)   { *dir = v2(-1.0f, 0.0f); }
+    if(max_depth == right_diff)  { *dir = v2(1.0f, 0.0f); }
+    if(max_depth == top_diff)    { *dir = v2(0.0f, 1.0f); }
+    if(max_depth == bottom_diff) { *dir = v2(0.0f, -1.0f); }
+
+    *depth = -max_depth;
+
+    return true;
+}
+void Avatar::check_and_resolve_collisions(Level *level)
+{
+    v2 avatar_bl = position - v2(1.0f, 1.0f) * full_extent * 0.5f;
+    v2 avatar_tr = position + v2(1.0f, 1.0f) * full_extent * 0.5f;
+
+    std::vector<float> rights;
+    std::vector<float> lefts;
+    std::vector<float> ups;
+    std::vector<float> downs;
+    bool won_level = false;
+
+    v2i bl = level->grid.world_to_cell(avatar_bl) - v2i(1, 1);
+    v2i tr = level->grid.world_to_cell(avatar_tr) + v2i(1, 1);
+    for(v2i pos = bl; pos.y <= tr.y; pos.y++)
+    {
+        for(pos.x = bl.x; pos.x <= tr.x; pos.x++)
+        {
+            if(level->grid.at(pos) == nullptr) continue;
+
+            if(level->grid.at(pos)->filled)
+            {
+                v2 cell_world_position = level->grid.cell_to_world(pos);
+                v2 cell_bl = cell_world_position;
+                v2 cell_tr = cell_world_position + v2(1.0f, 1.0f) * level->grid.world_scale;
+                v2 dir;
+                float depth;
+                bool collision = aabb(cell_bl, cell_tr, avatar_bl, avatar_tr, &dir, &depth);
+                if(collision)
+                {
+                    bool blocked = false;
+                    v2 n_dir = normalize(dir);
+                    v2i dir_i = v2i((int)(n_dir.x), (int)(n_dir.y));
+                    v2i pos_in_question = pos + dir_i;
+                    if(level->grid.at(pos_in_question) && level->grid.at(pos_in_question)->filled)
+                    {
+                        blocked = true;
+                    }
+
+                    if(!blocked)
+                    {
+                        if(dir_i.x ==  1 && dir_i.y ==  0) rights.push_back(depth);
+                        if(dir_i.x == -1 && dir_i.y ==  0) lefts.push_back(depth);
+                        if(dir_i.x ==  0 && dir_i.y ==  1) ups.push_back(depth);
+                        if(dir_i.x ==  0 && dir_i.y == -1) downs.push_back(depth);
+                    }
+                }
+            }
+
+            if(level->grid.at(pos)->win_when_touched)
+            {
+                v2 cell_world_position = level->grid.cell_to_world(pos);
+                v2 cell_bl = cell_world_position;
+                v2 cell_tr = cell_world_position + v2(1.0f, 1.0f) * level->grid.world_scale;
+                v2 dir;
+                float depth;
+                bool collision = aabb(cell_bl, cell_tr, avatar_bl, avatar_tr, &dir, &depth);
+                if(collision)
+                {
+                    won_level = true;
+                }
+            }
+        }
+    }
+
+    v2 resolution = v2();
+    float max_right = 0.0f;
+    float max_left = 0.0f;
+    float max_up = 0.0f;
+    float max_down = 0.0f;
+    for(int i = 0; i < rights.size(); i++) { max_right = max(rights[i], max_right); }
+    for(int i = 0; i < lefts.size(); i++)  { max_left  = max(lefts[i], max_left); }
+    for(int i = 0; i < ups.size(); i++)    { max_up    = max(ups[i], max_up); }
+    for(int i = 0; i < downs.size(); i++)  { max_down  = max(downs[i], max_down); }
+    resolution += v2(1.0f, 0.0f) * max_right;
+    resolution += v2(-1.0f, 0.0f) * max_left;
+    resolution += v2(0.0f, 1.0f) * max_up;
+    resolution += v2(0.0f, -1.0f) * max_down;
+
+    position += resolution;
+
+    if(length_squared(resolution) == 0.0f)
+    {
+        grounded = false;
+    }
+    if(resolution.y > 0.0f && vertical_velocity < 0.0f)
+    {
+        grounded = true;
+    }
+    if(resolution.y < 0.0f && vertical_velocity > 0.0f)
+    {
+        vertical_velocity = 0.0f;
+    }
+    if(GameMath::abs(resolution.x) > 0.0f)
+    {
+        horizontal_velocity = 0.0f;
+    }
+
+    if(won_level)
+    {
+        //level->change_mode(Level::Mode::WIN);
+    }
+}
+
+
+
+
+
+// HERE
+#if 0
+void Level::serialize(Serialization::Stream *stream)
+{
+    stream->write((int)avatars.size());
+    for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
+    {
+        GameInput::UID uid = pair.first;
+        Avatar *avatar = pair.second;
+
+        stream->write(uid);
+        stream->write(avatar->position);
+        stream->write(avatar->color);
+    }
+}
+
+void Level::deserialize(Serialization::Stream *stream)
+{
+    int num_avatars;
+    stream->read(&num_avatars);
+    std::vector<GameInput::UID> uids_seen;
+    for(int i = 0; i < num_avatars; i++)
+    {
+        GameInput::UID uid;
+        stream->read((int *)&uid);
+        uids_seen.push_back(uid);
+
+        Avatar *avatar = nullptr;
+        auto it = avatars.find(uid);
+        if(it == avatars.end())
+        {
+            avatar = add_avatar(uid);
+        }
+        else
+        {
+            avatar = it->second;
+        }
+        stream->read(&avatar->position);
+        stream->read(&avatar->color);
+    }
+
+    // Remove "dangling" avatars
+    // TODO: Fix this along with sync'ing avatars in step function (1/1/2021)
+    std::vector<GameInput::UID> uids_to_remove;
+    for(const std::pair<GameInput::UID, Avatar *> &pair : avatars)
+    {
+        auto it = std::find_if(uids_seen.begin(), uids_seen.end(), [&](const GameInput::UID &other_uid) { return other_uid == pair.first; });
+        if(it == uids_seen.end())
+        {
+            uids_to_remove.push_back(pair.first);
+        }
+    }
+    while(uids_to_remove.size() > 0)
+    {
+        remove_avatar(uids_to_remove.back());
+        uids_to_remove.pop_back();
+    }
+}
+#endif
+
+#pragma endregion
+
+
+
+
+
+
+void GameState::init() { }
+void GameState::uninit() { }
+void GameState::read_input() { }
+void GameState::step(UID focus_uid, float time_step) { }
+void GameState::draw() { }
+void GameState::serialize(Serialization::Stream *stream, UID uid, bool serialize) { }
+void GameState::serialize_input(Serialization::Stream *stream) { }
 #if DEBUG
-void GameState::draw_debug_ui()
-{
-}
+void GameState::draw_debug_ui() { }
 #endif
 
 
 
 void GameStateMenu::init()
 {
-    GameState::init();
+    mode = GameState::MAIN_MENU;
 
     screen = MAIN_MENU;
     confirming_quit_game = false;
@@ -162,11 +495,11 @@ void GameStateMenu::uninit()
 
 void GameStateMenu::read_input()
 {
+    // ...
 }
 
-void GameStateMenu::step(GameInput::UID focus_uid, float time_step)
+void GameStateMenu::step(UID focus_uid, float time_step)
 {
-    GameState::step(focus_uid, time_step);
 }
 
 void GameStateMenu::draw()
@@ -189,7 +522,7 @@ void GameStateMenu::draw_main_menu()
 
     if(ImGui::Button("Start", button_size()))
     {
-        Engine::switch_game_state(GameState::LOBBY);
+        Engine::switch_game_mode(GameState::LOBBY);
     }
 
     if(ImGui::Button("Join other player", button_size()))
@@ -224,9 +557,7 @@ void GameStateMenu::draw_main_menu()
     for(int i = 0; i < 12; i++) ImGui::Spacing();
     if(ImGui::Button("Edit Game", button_size()))
     {
-        Engine::switch_game_state(GameState::PLAYING_LEVEL);
-        Levels::start_level(0);
-        Engine::instance->editing = true;
+        Engine::switch_game_mode(GameState::EDITOR);
     }
 #endif
 
@@ -284,7 +615,11 @@ void GameStateMenu::draw_join_player()
     menu_window_end();
 }
 
-void GameStateMenu::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
+void GameStateMenu::serialize(Serialization::Stream *stream, UID uid, bool serialize)
+{
+}
+
+void GameStateMenu::serialize_input(Serialization::Stream *stream)
 {
 }
 
@@ -321,12 +656,10 @@ ImVec2 GameStateMenu::button_size()
 
 void GameStateLobby::init()
 {
-    // Initialize state for playing level
-    my_uid = 0;
     frame_number = 0;
-    inputs_this_frame.clear();
-    Levels::start_level(0);
-    level = Levels::get_active_level();
+    input.avatar_inputs.clear();
+    level = Levels::create_level(0);
+    local_uid = 0;
 }
 
 void GameStateLobby::uninit()
@@ -337,20 +670,15 @@ void GameStateLobby::uninit()
 
 void GameStateLobby::read_input()
 {
-    inputs_this_frame.clear();
+    input.avatar_inputs.clear();
 
     // Read input from local player
-    GameInput local_input;
+    AvatarInput local_input;
     // If we're a client, this field doesn't matter since we're sending
     // an input list to the server, it will just discard the uid
-    local_input.uid = 0;
-    v2 avatar_pos = v2();
-    if(!level->avatars.empty() && level->avatars[0] != nullptr)
-    {
-        avatar_pos = level->avatars[0]->position;
-    }
-    local_input.read_from_local(avatar_pos);
-    inputs_this_frame.push_back(local_input);
+    local_input.uid = local_uid;
+    local_input.read_from_local(avatars.find(local_uid));
+    input.avatar_inputs.push_back(local_input);
 
     // If we're a server, read inputs from all clients
     if(Engine::instance->network_mode == Engine::NetworkMode::SERVER)
@@ -358,12 +686,12 @@ void GameStateLobby::read_input()
         // Read remote player's input
         for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
         {
-            GameInput remote_input;
+            AvatarInput remote_input;
             remote_input.uid = client.uid;
             remote_input.read_from_connection(&(client.connection));
             if(client.connection != nullptr)
             {
-                inputs_this_frame.push_back(remote_input);
+                input.avatar_inputs.push_back(remote_input);
             }
         }
         // Clean out disconnected connections
@@ -371,27 +699,42 @@ void GameStateLobby::read_input()
     }
 }
 
-void GameStateLobby::step(GameInput::UID focus_uid, float time_step)
+void GameStateLobby::step(UID focus_uid, float time_step)
 {
-    GameState::step(focus_uid, time_step);
-    level->step(inputs_this_frame, time_step);
+    frame_number++;
+
+    level->step(time_step);
+
+    avatars.step(input.avatar_inputs, level, time_step);
 }
 
 void GameStateLobby::draw()
 {
     level->draw();
 
+    // Draw all avatars
+    v2 camera_offset = v2(16.0f, 4.0f);
+    Avatar *focus_avatar = avatars.find(local_uid);
+    if(focus_avatar != nullptr)
+    {
+        Graphics::Camera::position() = focus_avatar->position + camera_offset;
+    }
+    Graphics::Camera::width() = 64.0f;
+
+    // Draw the players
+    avatars.draw();
+
     ImGui::Begin("Select level");
 
     if(ImGui::Button("Level 1"))
     {
-        Engine::switch_game_state(GameState::PLAYING_LEVEL);
-        Levels::start_level(1);
+        Engine::switch_game_mode(GameState::PLAYING_LEVEL);
+        Engine::instance->level_to_load = 1;
     }
     if(ImGui::Button("Level 2"))
     {
-        Engine::switch_game_state(GameState::PLAYING_LEVEL);
-        Levels::start_level(2);
+        Engine::switch_game_mode(GameState::PLAYING_LEVEL);
+        Engine::instance->level_to_load = 2;
     }
     if(ImGui::Button("Open lobby"))
     {
@@ -405,39 +748,47 @@ void GameStateLobby::draw()
     ImGui::End();
 }
 
-void GameStateLobby::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
+void GameStateLobby::serialize(Serialization::Stream *stream, UID uid, bool serialize)
 {
     if(serialize)
     {
         stream->write(uid);
         stream->write(frame_number);
-        stream->write((int)inputs_this_frame.size());
-        for(GameInput &input : inputs_this_frame)
+        stream->write((int)input.avatar_inputs.size());
+        for(AvatarInput &input : input.avatar_inputs)
         {
             input.serialize(stream, true);
         }
-        level->serialize(stream);
+        level->serialize(stream, true);
     }
     else
     {
-        stream->read(&my_uid);
+        stream->read(&local_uid);
         stream->read(&frame_number);
         int num_inputs;
         stream->read(&num_inputs);
-        inputs_this_frame.resize(num_inputs);
+        input.avatar_inputs.resize(num_inputs);
         for(int i = 0; i < num_inputs; i++)
         {
-            GameInput *target = &(inputs_this_frame[i]);
+            AvatarInput *target = &(input.avatar_inputs[i]);
             target->serialize(stream, false);
         }
-        level->deserialize(stream);
+        level->serialize(stream, false);
+    }
+}
+
+void GameStateLobby::serialize_input(Serialization::Stream *stream)
+{
+    for(AvatarInput &input : input.avatar_inputs)
+    {
+        input.serialize(stream, true);
     }
 }
 
 #if DEBUG
 void GameStateLobby::draw_debug_ui()
 {
-    level->draw_debug_ui();
+    //level->draw_debug_ui();
 }
 #endif
 
@@ -446,36 +797,31 @@ void GameStateLobby::draw_debug_ui()
 void GameStateLevel::init()
 {
     // Initialize state for playing level
-    my_uid = 0;
+    local_uid = 0;
     frame_number = 0;
-    inputs_this_frame.clear();
-    playing_level = Levels::get_active_level();
+    input.avatar_inputs.clear();
+    level = Levels::create_level(Engine::instance->level_to_load);
 }
 
 void GameStateLevel::uninit()
 {
     //Levels::destroy_level(playing_level);
-    playing_level = nullptr;
+    level = nullptr;
 
     Engine::instance->editing = false;
 }
 
 void GameStateLevel::read_input()
 {
-    inputs_this_frame.clear();
+    input.avatar_inputs.clear();
 
     // Read input from local player
-    GameInput local_input;
+    AvatarInput local_input;
     // If we're a client, this field doesn't matter since we're sending
     // an input list to the server, it will just discard the uid
-    local_input.uid = 0;
-    v2 avatar_pos = v2();
-    if(!playing_level->avatars.empty() && playing_level->avatars[0] != nullptr)
-    {
-        avatar_pos = playing_level->avatars[0]->position;
-    }
-    local_input.read_from_local(avatar_pos);
-    inputs_this_frame.push_back(local_input);
+    local_input.uid = local_uid;
+    local_input.read_from_local(avatars.find(local_uid));
+    input.avatar_inputs.push_back(local_input);
 
     // If we're a server, read inputs from all clients
     if(Engine::instance->network_mode == Engine::NetworkMode::SERVER)
@@ -483,12 +829,12 @@ void GameStateLevel::read_input()
         // Read remote player's input
         for(Engine::Server::ClientConnection &client : Engine::instance->server.client_connections)
         {
-            GameInput remote_input;
+            AvatarInput remote_input;
             remote_input.uid = client.uid;
             remote_input.read_from_connection(&(client.connection));
             if(client.connection != nullptr)
             {
-                inputs_this_frame.push_back(remote_input);
+                input.avatar_inputs.push_back(remote_input);
             }
         }
         // Clean out disconnected connections
@@ -496,68 +842,92 @@ void GameStateLevel::read_input()
     }
 }
 
-void GameStateLevel::step(GameInput::UID focus_uid, float time_step)
+void GameStateLevel::step(UID focus_uid, float time_step)
 {
-    GameState::step(focus_uid, time_step);
-
+    frame_number++;
 
     if(Engine::instance->editing)
     {
-        playing_level->editor.step(playing_level, time_step);
+        level->editor.step(level, time_step);
     }
     else
     {
-        playing_level->step(inputs_this_frame, time_step);
+        level->step(time_step);
+
+        // Step avatars
+        avatars.step(input.avatar_inputs, level, time_step);
     }
 
 }
 
 void GameStateLevel::draw()
 {
-    playing_level->draw();
+    level->draw();
+
+    // Draw all avatars
+    v2 camera_offset = v2(16.0f, 4.0f);
+    Avatar *focus_avatar = avatars.find(local_uid);
+    if(focus_avatar != nullptr)
+    {
+        Graphics::Camera::position() = focus_avatar->position + camera_offset;
+    }
+    Graphics::Camera::width() = 64.0f;
+
+    // Draw the players
+    avatars.draw();
+
 
     if(Engine::instance->editing)
     {
-        playing_level->editor.draw(playing_level);
+        level->editor.draw(level);
     }
 }
 
-void GameStateLevel::serialize(Serialization::Stream *stream, GameInput::UID uid, bool serialize)
+void GameStateLevel::serialize(Serialization::Stream *stream, UID uid, bool serialize)
 {
     if(serialize)
     {
         stream->write(uid);
         stream->write(frame_number);
-        stream->write((int)inputs_this_frame.size());
-        for(GameInput &input : inputs_this_frame)
+        stream->write((int)input.avatar_inputs.size());
+        for(AvatarInput &input : input.avatar_inputs)
         {
             input.serialize(stream, true);
         }
-        playing_level->serialize(stream);
+        level->serialize(stream, true);
     }
     else
     {
-        stream->read(&my_uid);
+        stream->read(&local_uid);
         stream->read(&frame_number);
         int num_inputs;
         stream->read(&num_inputs);
-        inputs_this_frame.resize(num_inputs);
+        input.avatar_inputs.resize(num_inputs);
         for(int i = 0; i < num_inputs; i++)
         {
-            GameInput *target = &(inputs_this_frame[i]);
+            AvatarInput *target = &(input.avatar_inputs[i]);
             target->serialize(stream, false);
         }
-        playing_level->deserialize(stream);
+        level->serialize(stream, false);
+    }
+}
+
+void GameStateLevel::serialize_input(Serialization::Stream *stream)
+{
+    for(AvatarInput &input : input.avatar_inputs)
+    {
+        input.serialize(stream, true);
     }
 }
 
 #if DEBUG
 void GameStateLevel::draw_debug_ui()
 {
-    playing_level->draw_debug_ui();
+    //level->draw_debug_ui();
 
 }
 #endif
+
 
 
 
@@ -662,7 +1032,7 @@ void Engine::Client::disconnect_from_server()
     Network::disconnect(&server_connection);
 
     // Reset the level's state
-    Engine::switch_game_state(GameState::MAIN_MENU);
+    Engine::switch_game_mode(GameState::MAIN_MENU);
 }
 
 bool Engine::Client::is_connected()
@@ -679,7 +1049,7 @@ void Engine::Client::update_connection(float time_step)
 
     if(server_connection->is_connected())
     {
-        Engine::switch_game_state(GameState::PLAYING_LEVEL);
+        Engine::switch_game_mode(GameState::PLAYING_LEVEL);
         connecting_timeout_timer = 0.0f;
         return;
     }
@@ -793,12 +1163,7 @@ void Engine::step_as_client(GameState *game_state, float time_step)
 { 
     // This is before check_for_mode_switch because the connection might update the game mode
     Engine::instance->client.update_connection(time_step);
-    
-    // TODO:
-    // Once doing client side prediction, read input using the game state's read_input
-    // like other program states are doing
 
-    
     Platform::Input::read_input();
 
 
@@ -806,14 +1171,8 @@ void Engine::step_as_client(GameState *game_state, float time_step)
     if(Engine::instance->client.is_connected())
     {
         Serialization::Stream *input_stream = Serialization::make_stream();
-
         game_state->read_input();
-
-        for(GameInput &input : game_state->inputs_this_frame)
-        {
-            input.serialize(input_stream, true);
-        }
-
+        game_state->serialize_input(input_stream);
         Engine::instance->client.server_connection->send_stream(input_stream);
         Serialization::free_stream(input_stream);
     }
@@ -1127,7 +1486,7 @@ void Engine::init()
     instance->timeline->step_with_frequency(Engine::TARGET_STEP_TIME);
 }
 
-void Engine::switch_game_state(GameState::Mode mode)
+void Engine::switch_game_mode(GameState::Mode mode)
 {
     instance->next_mode = mode;
 }
@@ -1189,27 +1548,3 @@ void Engine::stop()
 {
     instance->running = false;
 }
-
-
-
-
-
-
-
-
-// TODO: Remove
-GameInput::UID Game::get_my_uid()
-{
-    return Engine::instance->current_game_state->my_uid;
-}
-void Game::start() { Engine::start(); }
-void Game::stop() { Engine::stop(); }
-
-// TODO: Make this like "CurrentGameState::exit_to_main_menu()" or something like that
-void Game::exit_to_main_menu()
-{
-    Engine::switch_game_state(GameState::MAIN_MENU);
-    Engine::switch_network_mode(Engine::NetworkMode::OFFLINE);
-}
-
-

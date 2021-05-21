@@ -196,7 +196,7 @@ void Platform::handle_os_events()
 
     if(instance->want_to_close)
     {
-        Game::stop();
+        Engine::stop();
     }
 }
 
