@@ -87,6 +87,26 @@ static void check_gl_errors(const char *desc)
     }
 }
 
+// https://stackoverflow.com/questions/589064/how-to-enable-vertical-sync-in-opengl
+static bool wgl_extension_supported(const char* extension_name)
+{
+    // this is pointer to function which returns pointer to string with list of all wgl extensions
+    PFNWGLGETEXTENSIONSSTRINGEXTPROC _wglGetExtensionsStringEXT = NULL;
+
+    // determine pointer to wglGetExtensionsStringEXT function
+    _wglGetExtensionsStringEXT = (PFNWGLGETEXTENSIONSSTRINGEXTPROC)wglGetProcAddress("wglGetExtensionsStringEXT");
+
+    auto string = _wglGetExtensionsStringEXT();
+    if(strstr(_wglGetExtensionsStringEXT(), extension_name) == NULL)
+    {
+        // string was not found
+        return false;
+    }
+
+    // extension is supported
+    return true;
+}
+
 static void create_gl_context(GraphicsState *instance)
 {
     HDC dc = Windows::device_context();
@@ -150,6 +170,13 @@ static void create_gl_context(GraphicsState *instance)
     glGetIntegerv(GL_MINOR_VERSION, &OpenGLVersion[1]);
 
     if(!instance->gl_context) return; // Bad
+
+    // Disable vsync
+    if(wgl_extension_supported("WGL_EXT_swap_control"))
+    {
+        PFNWGLSWAPINTERVALEXTPROC wgl_swap_interval = (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
+        wgl_swap_interval(0);
+    }
 }
 
 

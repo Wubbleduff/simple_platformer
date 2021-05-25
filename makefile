@@ -62,7 +62,7 @@ debug: | intermediate $(DEBUG_RUN_TREE)
 
 optimized_debug: | intermediate $(OPTIMIZED_DEBUG_RUN_TREE)
 	cl $(OPTIMIZED_DEBUG_COMPILE_FLAGS) $(INCLUDE_DIRS) $(SOURCE)
-	link $(OPTIMIZED_DEBUG_LINK_FLAGS) $(LIBS) $(INTERMEDIATE)\*.obj
+	call link $(OPTIMIZED_DEBUG_LINK_FLAGS) $(LIBS) $(INTERMEDIATE)\*.obj
 	xcopy /Y $(INTERMEDIATE)\$(EXE) $(OPTIMIZED_DEBUG_RUN_TREE)
 	xcopy /Y $(INTERMEDIATE)\$(PDB) $(OPTIMIZED_DEBUG_RUN_TREE)
 	xcopy /Y $(DLL_GLEW) $(OPTIMIZED_DEBUG_RUN_TREE)
@@ -70,7 +70,7 @@ optimized_debug: | intermediate $(OPTIMIZED_DEBUG_RUN_TREE)
 
 release: | intermediate $(RELEASE_RUN_TREE)
 	cl $(RELEASE_COMPILE_FLAGS) $(INCLUDE_DIRS) $(SOURCE)
-	link $(RELEASE_LINK_FLAGS) $(LIBS) $(INTERMEDIATE)\*.obj
+	call link $(RELEASE_LINK_FLAGS) $(LIBS) $(INTERMEDIATE)\*.obj
 	xcopy /Y $(INTERMEDIATE)\$(EXE) $(RELEASE_RUN_TREE)
 	xcopy /Y $(DLL_GLEW) $(RELEASE_RUN_TREE)
 	xcopy /Y /E assets $(RELEASE_RUN_TREE)\assets\

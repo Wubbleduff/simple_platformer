@@ -945,6 +945,9 @@ void Engine::draw_debug_menu()
             }
             if(ImGui::BeginTabItem("Frame times"))
             {
+                //ImGui::PlotHistogram("Frames", step_times.data(), step_times.size(), int values_offset = 0, const char* overlay_text = NULL, float scale_min = FLT_MAX, float scale_max = FLT_MAX, ImVec2 graph_size = ImVec2(0, 0), int stride = sizeof(float));
+                ImGui::PlotHistogram("Frames", Engine::instance->timeline->step_times.data(), Engine::instance->timeline->step_times.size(), 0, NULL, 0, 0.032f, ImVec2(500, 300));
+
                 ImGui::EndTabItem();
             }
 
